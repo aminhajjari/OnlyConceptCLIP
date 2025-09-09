@@ -33,7 +33,7 @@ from ConceptModel.preprocessor_conceptclip import ConceptCLIPProcessor
 # Your dataset paths (Narval specific)
 DATASET_PATH = "/project/def-arashmoh/shahab33/XAI/MILK10k_Training_Input/MILK10k_Training_Input"
 GROUNDTRUTH_PATH = "/project/def-arashmoh/shahab33/XAI/MILK10k_Training_Input/groundtruth.csv"
-OUTPUT_PATH = "/project/def-arashmoh/shahab33/XAI/MILK10k_Training_Input/outputs"
+OUTPUT_PATH = "/project/def-arashmoh/shahab33/XAI/MILK10k_Training_Input/Conoutput"
 
 # Local model paths
 CONCEPTCLIP_MODEL_PATH = "/project/def-arashmoh/shahab33/XAI/MILK10k_Training_Input/ConceptModel"
