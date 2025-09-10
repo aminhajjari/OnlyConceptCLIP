@@ -57,7 +57,7 @@ echo ""
 echo "Setting environment variables..."
 export PYTHONPATH="$PROJECT_DIR:$PYTHONPATH"
 export DATASET_PATH="$PROJECT_DIR/MILK10k_Training_Input"
-export GROUNDTRUTH_PATH="$PROJECT_DIR/groundtruth.csv"
+export GROUNDTRUTH_PATH="$PROJECT_DIR/MILK10k_Training_GroundTruth.csv"
 export OUTPUT_PATH="$SCRIPT_DIR/outputs"
 
 # Narval optimizations
