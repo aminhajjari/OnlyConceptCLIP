@@ -1103,7 +1103,7 @@ def main():
     print(f"   📄 Paper metrics: {output_path / 'evaluation_metrics' / 'paper_comparison_metrics.csv'}")
     print(f"   📊 Visualizations: {output_path / 'visualizations'}")
     
-    print(f"\n✅ All outputs saved to recognizable folder: {output_path.name}")
+    print(f"\n✅ All outputs saved to folder: ClassConCLIPout")
     print("🎉 Enhanced MILK10k classification pipeline completed successfully!")
 
 if __name__ == "__main__":
