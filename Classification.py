@@ -1,5 +1,6 @@
 # MILK10k Medical Image Classification Pipeline - Enhanced Version
 # Classification with comprehensive evaluation metrics
+# Modified to save to specific directory without timestamps
 
 import os
 import cv2
@@ -21,8 +22,10 @@ import warnings
 from datetime import datetime
 from sklearn.metrics import (
     accuracy_score, precision_score, recall_score, f1_score,
-    classification_report, confusion_matrix, precision_recall_fscore_support
+    classification_report, confusion_matrix, precision_recall_fscore_support,
+    roc_auc_score, roc_curve, auc
 )
+from sklearn.preprocessing import label_binarize
 warnings.filterwarnings('ignore')
 
 # Set up Python path for ConceptModel imports
@@ -38,19 +41,35 @@ from ConceptModel.preprocessor_conceptclip import ConceptCLIPProcessor
 # Your dataset paths (Narval specific)
 DATASET_PATH = "/project/def-arashmoh/shahab33/XAI/MILK10k_Training_Input/MILK10k_Training_Input"
 GROUNDTRUTH_PATH = "/project/def-arashmoh/shahab33/XAI/MILK10k_Training_Input/MILK10k_Training_GroundTruth.csv"
-BASE_OUTPUT_PATH = "/project/def-arashmoh/shahab33/XAI/MILK10k_Training_Input"
+
+# FIXED OUTPUT PATH - No timestamped folders
+BASE_OUTPUT_PATH = "/project/def-arashmoh/shahab33/XAI/MILK10k_Training_Input/OnlyResualts"
 
 # Local model paths
 CONCEPTCLIP_MODEL_PATH = "/project/def-arashmoh/shahab33/XAI/MILK10k_Training_Input/ConceptModel"
 HUGGINGFACE_CACHE_PATH = "/project/def-arashmoh/shahab33/XAI/MILK10k_Training_Input/huggingface_cache"
 
-# ==================== OUTPUT FOLDER NAMING ====================
+# ==================== OUTPUT FOLDER SETUP ====================
 
-def create_experiment_folder():
-    """Create a recognizable experiment folder name"""
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    folder_name = f"MILK10k_ConceptCLIP_Classification_{timestamp}"
-    output_path = Path(BASE_OUTPUT_PATH) / folder_name
+def setup_output_folder():
+    """Setup the fixed output folder structure"""
+    output_path = Path(BASE_OUTPUT_PATH)
+    
+    # Create main directory if it doesn't exist
+    output_path.mkdir(parents=True, exist_ok=True)
+    
+    # Create subdirectories
+    subdirs = [
+        "classifications",
+        "visualizations", 
+        "reports",
+        "processed_images",
+        "evaluation_metrics"
+    ]
+    
+    for subdir in subdirs:
+        (output_path / subdir).mkdir(exist_ok=True)
+    
     return output_path
 
 # ==================== GPU DETECTION AND SETUP ====================
@@ -287,14 +306,14 @@ MILK10K_DOMAIN = MedicalDomain(
 # ==================== ENHANCED EVALUATION METRICS ====================
 
 class ComprehensiveEvaluator:
-    """Comprehensive evaluation with all required metrics"""
+    """Comprehensive evaluation with all required metrics including ROC-AUC"""
     
     def __init__(self, class_names: List[str]):
         self.class_names = class_names
         
     def calculate_comprehensive_metrics(self, y_true: List[str], y_pred: List[str], 
                                       y_pred_proba: Optional[List[List[float]]] = None) -> Dict:
-        """Calculate all evaluation metrics"""
+        """Calculate all evaluation metrics including ROC-AUC"""
         
         # Convert string labels to indices for sklearn
         label_to_idx = {label: idx for idx, label in enumerate(self.class_names)}
@@ -310,6 +329,12 @@ class ComprehensiveEvaluator:
         
         y_true_filtered = [y_true_idx[i] for i in valid_indices]
         y_pred_filtered = [y_pred_idx[i] for i in valid_indices]
+        
+        # Filter probabilities if provided
+        if y_pred_proba:
+            y_pred_proba_filtered = [y_pred_proba[i] for i in valid_indices]
+        else:
+            y_pred_proba_filtered = None
         
         # Calculate basic metrics
         accuracy = accuracy_score(y_true_filtered, y_pred_filtered)
@@ -327,6 +352,9 @@ class ComprehensiveEvaluator:
         precision_per_class, recall_per_class, f1_per_class, support_per_class = precision_recall_fscore_support(
             y_true_filtered, y_pred_filtered, labels=list(range(len(self.class_names))), zero_division=0
         )
+        
+        # ROC-AUC Calculation
+        roc_auc_metrics = self._calculate_roc_auc(y_true_filtered, y_pred_proba_filtered)
         
         # Confusion matrix
         cm = confusion_matrix(y_true_filtered, y_pred_filtered, labels=list(range(len(self.class_names))))
@@ -348,22 +376,105 @@ class ComprehensiveEvaluator:
                 'f1_macro': f1_macro,
                 'precision_weighted': precision_weighted,
                 'recall_weighted': recall_weighted,
-                'f1_weighted': f1_weighted
+                'f1_weighted': f1_weighted,
+                # ROC-AUC metrics
+                'roc_auc_ovr_macro': roc_auc_metrics['ovr_macro'],
+                'roc_auc_ovr_weighted': roc_auc_metrics['ovr_weighted'],
+                'roc_auc_ovo_macro': roc_auc_metrics['ovo_macro'],
+                'roc_auc_ovo_weighted': roc_auc_metrics['ovo_weighted']
             },
             'per_class_metrics': {
                 self.class_names[i]: {
                     'precision': float(precision_per_class[i]),
                     'recall': float(recall_per_class[i]),
                     'f1_score': float(f1_per_class[i]),
-                    'support': int(support_per_class[i])
+                    'support': int(support_per_class[i]),
+                    'roc_auc': roc_auc_metrics['per_class'][i] if i < len(roc_auc_metrics['per_class']) else 0.0
                 } for i in range(len(self.class_names))
             },
             'confusion_matrix': cm.tolist(),
             'classification_report': class_report,
-            'class_names': self.class_names
+            'class_names': self.class_names,
+            'roc_curves': roc_auc_metrics.get('curves', {})
         }
         
         return metrics
+    
+    def _calculate_roc_auc(self, y_true: List[int], y_pred_proba: Optional[List[List[float]]]) -> Dict:
+        """Calculate ROC-AUC metrics for multi-class classification"""
+        
+        if y_pred_proba is None or len(y_pred_proba) == 0:
+            return {
+                'ovr_macro': 0.0,
+                'ovr_weighted': 0.0,
+                'ovo_macro': 0.0,
+                'ovo_weighted': 0.0,
+                'per_class': [0.0] * len(self.class_names),
+                'curves': {}
+            }
+        
+        try:
+            # Convert to numpy arrays
+            y_true_array = np.array(y_true)
+            y_pred_proba_array = np.array(y_pred_proba)
+            
+            # Binarize the labels for One-vs-Rest
+            y_true_binarized = label_binarize(y_true_array, classes=list(range(len(self.class_names))))
+            
+            # Calculate One-vs-Rest ROC-AUC
+            roc_auc_ovr_macro = roc_auc_score(y_true_binarized, y_pred_proba_array, 
+                                             average='macro', multi_class='ovr')
+            roc_auc_ovr_weighted = roc_auc_score(y_true_binarized, y_pred_proba_array, 
+                                                average='weighted', multi_class='ovr')
+            
+            # Calculate One-vs-One ROC-AUC
+            roc_auc_ovo_macro = roc_auc_score(y_true_array, y_pred_proba_array, 
+                                             average='macro', multi_class='ovo')
+            roc_auc_ovo_weighted = roc_auc_score(y_true_array, y_pred_proba_array, 
+                                                average='weighted', multi_class='ovo')
+            
+            # Calculate per-class ROC-AUC and curves
+            per_class_auc = []
+            curves = {}
+            
+            for i in range(len(self.class_names)):
+                if i < y_true_binarized.shape[1] and i < y_pred_proba_array.shape[1]:
+                    # Check if this class exists in the true labels
+                    if np.sum(y_true_binarized[:, i]) > 0:
+                        fpr, tpr, thresholds = roc_curve(y_true_binarized[:, i], y_pred_proba_array[:, i])
+                        auc_score = auc(fpr, tpr)
+                        per_class_auc.append(float(auc_score))
+                        
+                        # Store curve data for visualization
+                        curves[self.class_names[i]] = {
+                            'fpr': fpr.tolist(),
+                            'tpr': tpr.tolist(),
+                            'auc': float(auc_score)
+                        }
+                    else:
+                        per_class_auc.append(0.0)
+                else:
+                    per_class_auc.append(0.0)
+            
+            return {
+                'ovr_macro': float(roc_auc_ovr_macro),
+                'ovr_weighted': float(roc_auc_ovr_weighted),
+                'ovo_macro': float(roc_auc_ovo_macro),
+                'ovo_weighted': float(roc_auc_ovo_weighted),
+                'per_class': per_class_auc,
+                'curves': curves
+            }
+            
+        except Exception as e:
+            print(f"Warning: Error calculating ROC-AUC: {e}")
+            return {
+                'ovr_macro': 0.0,
+                'ovr_weighted': 0.0,
+                'ovo_macro': 0.0,
+                'ovo_weighted': 0.0,
+                'per_class': [0.0] * len(self.class_names),
+                'curves': {}
+            }
     
     def _empty_metrics(self) -> Dict:
         """Return empty metrics when no valid samples"""
@@ -377,12 +488,17 @@ class ComprehensiveEvaluator:
                 'f1_macro': 0.0,
                 'precision_weighted': 0.0,
                 'recall_weighted': 0.0,
-                'f1_weighted': 0.0
+                'f1_weighted': 0.0,
+                'roc_auc_ovr_macro': 0.0,
+                'roc_auc_ovr_weighted': 0.0,
+                'roc_auc_ovo_macro': 0.0,
+                'roc_auc_ovo_weighted': 0.0
             },
             'per_class_metrics': {},
             'confusion_matrix': [],
             'classification_report': {},
-            'class_names': self.class_names
+            'class_names': self.class_names,
+            'roc_curves': {}
         }
 
 # ==================== MAIN PIPELINE CLASS ====================
@@ -398,17 +514,9 @@ class MILK10kEnhancedClassificationPipeline:
         self.cache_path = cache_path or HUGGINGFACE_CACHE_PATH
         self.domain = MILK10K_DOMAIN
         
-        # Create recognizable output folder
-        self.output_path = create_experiment_folder()
-        print(f"📁 Experiment folder created: {self.output_path}")
-        
-        # Create output directories
-        self.output_path.mkdir(parents=True, exist_ok=True)
-        (self.output_path / "classifications").mkdir(exist_ok=True)
-        (self.output_path / "visualizations").mkdir(exist_ok=True)
-        (self.output_path / "reports").mkdir(exist_ok=True)
-        (self.output_path / "processed_images").mkdir(exist_ok=True)
-        (self.output_path / "evaluation_metrics").mkdir(exist_ok=True)
+        # Setup fixed output folder (no timestamps)
+        self.output_path = setup_output_folder()
+        print(f"📁 Output folder: {self.output_path}")
         
         # Initialize device with proper setup
         self.device = setup_gpu_environment()
@@ -679,7 +787,7 @@ class MILK10kEnhancedClassificationPipeline:
     
     def _generate_comprehensive_report(self, results: List[Dict], format_counter: Counter, 
                                      evaluation_metrics: Dict) -> Dict:
-        """Generate comprehensive processing report with all metrics"""
+        """Generate comprehensive processing report with all metrics including ROC-AUC"""
         
         # Basic statistics
         total_processed = len(results)
@@ -701,15 +809,17 @@ class MILK10kEnhancedClassificationPipeline:
         precision_macro = evaluation_metrics['overview']['precision_macro']
         recall_macro = evaluation_metrics['overview']['recall_macro']
         f1_macro = evaluation_metrics['overview']['f1_macro']
+        roc_auc_ovr_macro = evaluation_metrics['overview']['roc_auc_ovr_macro']
+        roc_auc_ovr_weighted = evaluation_metrics['overview']['roc_auc_ovr_weighted']
         
         report = {
             'experiment_info': {
-                'experiment_name': self.output_path.name,
+                'experiment_name': 'MILK10k_ConceptCLIP_Classification',
                 'timestamp': datetime.now().isoformat(),
                 'dataset_path': str(self.dataset_path),
                 'output_path': str(self.output_path),
                 'model_type': 'ConceptCLIP',
-                'pipeline_version': 'Enhanced_v2.0'
+                'pipeline_version': 'Enhanced_v2.0_Fixed_Output_with_ROC'
             },
             'system_info': {
                 'device_used': device_used,
@@ -738,7 +848,11 @@ class MILK10kEnhancedClassificationPipeline:
                 'f1_score_macro': f1_macro,
                 'precision_weighted': evaluation_metrics['overview']['precision_weighted'],
                 'recall_weighted': evaluation_metrics['overview']['recall_weighted'],
-                'f1_score_weighted': evaluation_metrics['overview']['f1_weighted']
+                'f1_score_weighted': evaluation_metrics['overview']['f1_weighted'],
+                'roc_auc_ovr_macro': roc_auc_ovr_macro,
+                'roc_auc_ovr_weighted': roc_auc_ovr_weighted,
+                'roc_auc_ovo_macro': evaluation_metrics['overview']['roc_auc_ovo_macro'],
+                'roc_auc_ovo_weighted': evaluation_metrics['overview']['roc_auc_ovo_weighted']
             },
             'detailed_evaluation': evaluation_metrics,
             'predictions': {
@@ -786,6 +900,9 @@ class MILK10kEnhancedClassificationPipeline:
             'Precision (Weighted)': f"{report['paper_comparison_metrics']['precision_weighted']:.4f}",
             'Recall (Weighted)': f"{report['paper_comparison_metrics']['recall_weighted']:.4f}",
             'F1-Score (Weighted)': f"{report['paper_comparison_metrics']['f1_score_weighted']:.4f}",
+            'ROC-AUC (OvR Macro)': f"{report['paper_comparison_metrics']['roc_auc_ovr_macro']:.4f}",
+            'ROC-AUC (OvR Weighted)': f"{report['paper_comparison_metrics']['roc_auc_ovr_weighted']:.4f}",
+            'ROC-AUC (OvO Macro)': f"{report['paper_comparison_metrics']['roc_auc_ovo_macro']:.4f}",
             'Total Samples': evaluation_metrics['overview']['valid_samples']
         }
         
@@ -799,7 +916,7 @@ class MILK10kEnhancedClassificationPipeline:
         # Create classification report text file
         self._save_classification_report_text(evaluation_metrics)
         
-        print(f"\n📊 COMPREHENSIVE RESULTS SAVED:")
+        print(f"\n📊 RESULTS SAVED TO FIXED LOCATION:")
         print(f"   📁 Output folder: {self.output_path}")
         print(f"   🖼️  Processed images: {self.output_path / 'processed_images'}")
         print(f"   📋 Detailed results: {results_path}")
@@ -809,7 +926,7 @@ class MILK10kEnhancedClassificationPipeline:
         print(f"   📊 Visualizations: {self.output_path / 'visualizations'}")
     
     def _save_classification_report_text(self, evaluation_metrics: Dict):
-        """Save sklearn classification report as text file"""
+        """Save sklearn classification report as text file with ROC-AUC"""
         if 'classification_report' in evaluation_metrics:
             from sklearn.metrics import classification_report
             
@@ -823,6 +940,7 @@ class MILK10kEnhancedClassificationPipeline:
                 report_text += f"  Precision: {metrics['precision']:.4f}\n"
                 report_text += f"  Recall: {metrics['recall']:.4f}\n"
                 report_text += f"  F1-Score: {metrics['f1_score']:.4f}\n"
+                report_text += f"  ROC-AUC: {metrics['roc_auc']:.4f}\n"
                 report_text += f"  Support: {metrics['support']}\n\n"
             
             # Add overall metrics
@@ -834,7 +952,14 @@ class MILK10kEnhancedClassificationPipeline:
             report_text += f"  Macro F1-Score: {overview['f1_macro']:.4f}\n"
             report_text += f"  Weighted Precision: {overview['precision_weighted']:.4f}\n"
             report_text += f"  Weighted Recall: {overview['recall_weighted']:.4f}\n"
-            report_text += f"  Weighted F1-Score: {overview['f1_weighted']:.4f}\n"
+            report_text += f"  Weighted F1-Score: {overview['f1_weighted']:.4f}\n\n"
+            
+            # Add ROC-AUC metrics
+            report_text += "ROC-AUC Metrics:\n"
+            report_text += f"  One-vs-Rest (Macro): {overview['roc_auc_ovr_macro']:.4f}\n"
+            report_text += f"  One-vs-Rest (Weighted): {overview['roc_auc_ovr_weighted']:.4f}\n"
+            report_text += f"  One-vs-One (Macro): {overview['roc_auc_ovo_macro']:.4f}\n"
+            report_text += f"  One-vs-One (Weighted): {overview['roc_auc_ovo_weighted']:.4f}\n"
             
             report_text_path = self.output_path / "evaluation_metrics" / "classification_report.txt"
             with open(report_text_path, 'w') as f:
@@ -1003,6 +1128,9 @@ class MILK10kEnhancedClassificationPipeline:
         # Create separate confusion matrix with better formatting
         self._create_detailed_confusion_matrix(evaluation_metrics)
         
+        # Create ROC curves visualization
+        self._create_roc_curves(evaluation_metrics)
+        
         print(f"📈 Comprehensive visualizations saved to: {viz_path}")
     
     def _create_detailed_confusion_matrix(self, evaluation_metrics: Dict):
@@ -1042,6 +1170,113 @@ class MILK10kEnhancedClassificationPipeline:
         cm_path = self.output_path / "visualizations" / "detailed_confusion_matrix.png"
         plt.savefig(cm_path, dpi=300, bbox_inches='tight', facecolor='white')
         plt.close()
+    
+    def _create_roc_curves(self, evaluation_metrics: Dict):
+        """Create ROC curve visualizations for multi-class classification"""
+        if 'roc_curves' not in evaluation_metrics or not evaluation_metrics['roc_curves']:
+            print("No ROC curve data available for visualization")
+            return
+        
+        curves_data = evaluation_metrics['roc_curves']
+        n_classes = len(self.class_names)
+        
+        # Create figure with subplots
+        fig, axes = plt.subplots(2, 2, figsize=(15, 12))
+        
+        # 1. All classes ROC curves in one plot
+        ax1 = axes[0, 0]
+        for class_name, curve_data in curves_data.items():
+            ax1.plot(curve_data['fpr'], curve_data['tpr'], 
+                    label=f"{class_name} (AUC = {curve_data['auc']:.3f})", 
+                    linewidth=2)
+        
+        ax1.plot([0, 1], [0, 1], 'k--', linewidth=1, label='Random Classifier')
+        ax1.set_xlabel('False Positive Rate', fontsize=10)
+        ax1.set_ylabel('True Positive Rate', fontsize=10)
+        ax1.set_title('ROC Curves - All Classes', fontsize=12, fontweight='bold')
+        ax1.legend(loc='lower right', fontsize=8)
+        ax1.grid(True, alpha=0.3)
+        
+        # 2. Macro-Average ROC
+        ax2 = axes[0, 1]
+        # Calculate macro-average ROC curve (simplified visualization)
+        mean_fpr = np.linspace(0, 1, 100)
+        mean_tpr = np.zeros_like(mean_fpr)
+        
+        for class_name, curve_data in curves_data.items():
+            # Interpolate TPR at common FPR points
+            tpr_interp = np.interp(mean_fpr, curve_data['fpr'], curve_data['tpr'])
+            mean_tpr += tpr_interp
+        
+        mean_tpr /= len(curves_data)
+        macro_auc = evaluation_metrics['overview']['roc_auc_ovr_macro']
+        
+        ax2.plot(mean_fpr, mean_tpr, color='b', linewidth=3,
+                label=f'Macro-Average (AUC = {macro_auc:.3f})')
+        ax2.plot([0, 1], [0, 1], 'k--', linewidth=1, label='Random Classifier')
+        ax2.fill_between(mean_fpr, 0, mean_tpr, alpha=0.2, color='b')
+        ax2.set_xlabel('False Positive Rate', fontsize=10)
+        ax2.set_ylabel('True Positive Rate', fontsize=10)
+        ax2.set_title('Macro-Average ROC Curve', fontsize=12, fontweight='bold')
+        ax2.legend(loc='lower right', fontsize=10)
+        ax2.grid(True, alpha=0.3)
+        
+        # 3. Per-Class AUC Bar Chart
+        ax3 = axes[1, 0]
+        class_names_short = [cls.replace(' ', '\n') for cls in self.class_names]
+        per_class_aucs = [evaluation_metrics['per_class_metrics'][cls]['roc_auc'] 
+                         for cls in self.class_names]
+        
+        bars = ax3.bar(class_names_short, per_class_aucs, color='skyblue', alpha=0.8)
+        ax3.set_xlabel('Classes', fontsize=10)
+        ax3.set_ylabel('AUC Score', fontsize=10)
+        ax3.set_title('Per-Class ROC-AUC Scores', fontsize=12, fontweight='bold')
+        ax3.set_ylim([0, 1])
+        ax3.axhline(y=0.5, color='r', linestyle='--', alpha=0.5, label='Random (0.5)')
+        ax3.legend()
+        
+        # Add value labels on bars
+        for bar, auc in zip(bars, per_class_aucs):
+            height = bar.get_height()
+            ax3.text(bar.get_x() + bar.get_width()/2., height + 0.01,
+                    f'{auc:.3f}', ha='center', va='bottom', fontsize=8)
+        
+        ax3.tick_params(axis='x', rotation=45)
+        
+        # 4. ROC-AUC Comparison (Different averaging methods)
+        ax4 = axes[1, 1]
+        metrics_names = ['OvR\nMacro', 'OvR\nWeighted', 'OvO\nMacro', 'OvO\nWeighted']
+        metrics_values = [
+            evaluation_metrics['overview']['roc_auc_ovr_macro'],
+            evaluation_metrics['overview']['roc_auc_ovr_weighted'],
+            evaluation_metrics['overview']['roc_auc_ovo_macro'],
+            evaluation_metrics['overview']['roc_auc_ovo_weighted']
+        ]
+        
+        colors = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4']
+        bars = ax4.bar(metrics_names, metrics_values, color=colors, alpha=0.8)
+        ax4.set_xlabel('ROC-AUC Method', fontsize=10)
+        ax4.set_ylabel('AUC Score', fontsize=10)
+        ax4.set_title('ROC-AUC Scores by Method', fontsize=12, fontweight='bold')
+        ax4.set_ylim([0, 1])
+        ax4.axhline(y=0.5, color='r', linestyle='--', alpha=0.5, label='Random (0.5)')
+        ax4.legend()
+        
+        # Add value labels on bars
+        for bar, value in zip(bars, metrics_values):
+            ax4.text(bar.get_x() + bar.get_width()/2., bar.get_height() + 0.01,
+                    f'{value:.3f}', ha='center', va='bottom', fontweight='bold')
+        
+        plt.suptitle('ROC Analysis - MILK10k ConceptCLIP Classification', 
+                    fontsize=14, fontweight='bold', y=1.02)
+        plt.tight_layout()
+        
+        # Save ROC curves visualization
+        roc_path = self.output_path / "visualizations" / "roc_curves_analysis.png"
+        plt.savefig(roc_path, dpi=300, bbox_inches='tight', facecolor='white')
+        plt.close()
+        
+        print(f"📊 ROC curves saved to: {roc_path}")
 
 
 # ==================== MAIN EXECUTION ====================
@@ -1052,6 +1287,7 @@ def main():
     print("="*70)
     print("MILK10K MEDICAL IMAGE CLASSIFICATION PIPELINE - ENHANCED VERSION")
     print("With Comprehensive Evaluation Metrics for Paper Comparison")
+    print("Output: /project/def-arashmoh/shahab33/XAI/MILK10k_Training_Input/OnlyResualts")
     print("="*70)
     
     # Initialize enhanced pipeline
@@ -1071,7 +1307,7 @@ def main():
     print("="*60)
     
     # System info
-    print(f"📁 Experiment: {report['experiment_info']['experiment_name']}")
+    print(f"📁 Output Location: {BASE_OUTPUT_PATH}")
     print(f"🖥️  Device: {report['system_info']['device_used']}")
     print(f"💾 Cache: {report['system_info']['cache_directory']}")
     print(f"🔌 Offline mode: {report['system_info']['offline_mode']}")
@@ -1084,17 +1320,19 @@ def main():
     
     # KEY METRICS FOR PAPER COMPARISON
     print(f"\n🎯 PAPER COMPARISON METRICS:")
-    print(f"   Accuracy:           {report['paper_comparison_metrics']['accuracy']:.4f}")
-    print(f"   Precision (Macro):  {report['paper_comparison_metrics']['precision_macro']:.4f}")
-    print(f"   Recall (Macro):     {report['paper_comparison_metrics']['recall_macro']:.4f}")
-    print(f"   F1-Score (Macro):   {report['paper_comparison_metrics']['f1_score_macro']:.4f}")
+    print(f"   Accuracy:             {report['paper_comparison_metrics']['accuracy']:.4f}")
+    print(f"   Precision (Macro):    {report['paper_comparison_metrics']['precision_macro']:.4f}")
+    print(f"   Recall (Macro):       {report['paper_comparison_metrics']['recall_macro']:.4f}")
+    print(f"   F1-Score (Macro):     {report['paper_comparison_metrics']['f1_score_macro']:.4f}")
+    print(f"   ROC-AUC (OvR Macro):  {report['paper_comparison_metrics']['roc_auc_ovr_macro']:.4f}")
+    print(f"   ROC-AUC (OvR Weight): {report['paper_comparison_metrics']['roc_auc_ovr_weighted']:.4f}")
     print(f"   Precision (Weighted): {report['paper_comparison_metrics']['precision_weighted']:.4f}")
     print(f"   Recall (Weighted):    {report['paper_comparison_metrics']['recall_weighted']:.4f}")
     print(f"   F1-Score (Weighted):  {report['paper_comparison_metrics']['f1_score_weighted']:.4f}")
     
     # Output locations
-    output_path = Path(report['experiment_info']['output_path'])
-    print(f"\n📂 OUTPUT LOCATIONS:")
+    output_path = Path(BASE_OUTPUT_PATH)
+    print(f"\n📂 ALL OUTPUTS SAVED TO:")
     print(f"   🎯 Main folder: {output_path}")
     print(f"   🖼️  Processed images: {output_path / 'processed_images'}")
     print(f"   📋 Classification results: {output_path / 'reports' / 'classification_results.csv'}")
@@ -1103,7 +1341,7 @@ def main():
     print(f"   📄 Paper metrics: {output_path / 'evaluation_metrics' / 'paper_comparison_metrics.csv'}")
     print(f"   📊 Visualizations: {output_path / 'visualizations'}")
     
-    print(f"\n✅ All outputs saved to folder: ClassConCLIPout")
+    print(f"\n✅ All outputs saved to: {BASE_OUTPUT_PATH}")
     print("🎉 Enhanced MILK10k classification pipeline completed successfully!")
 
 if __name__ == "__main__":
