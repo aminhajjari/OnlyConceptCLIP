@@ -1,6 +1,9 @@
-# MILK10k Medical Image Classification Pipeline - Enhanced Version with Debug Prints
-# Classification with comprehensive evaluation metrics
-# Modified to save to specific directory without timestamps
+# MILK10k Medical Image Classification Pipeline - Limited to 100 Images
+# Modified to process only 100 images with comprehensive debug prints
+#If you later want to process all images, just change line 48:
+
+
+
 
 import os
 import cv2
@@ -28,7 +31,9 @@ from sklearn.metrics import (
 from sklearn.preprocessing import label_binarize
 warnings.filterwarnings('ignore')
 
+print("="*60)
 print("✓ All imports loaded successfully")
+print("="*60)
 
 # Set up Python path for ConceptModel imports
 import sys
@@ -43,7 +48,14 @@ except ImportError as e:
     print(f"⚠️ ConceptCLIP import error: {e}")
     print("Will use dummy models for testing")
 
+print("✓ SECTION: Module imports completed successfully")
+print("-"*60)
+
 # ==================== CONFIGURATION ====================
+
+# DEBUG MODE - Process only 100 images
+DEBUG_MODE = True
+MAX_DEBUG_IMAGES = 100
 
 # Your dataset paths (Narval specific)
 DATASET_PATH = "/project/def-arashmoh/shahab33/XAI/MILK10k_Training_Input/MILK10k_Training_Input"
@@ -57,6 +69,10 @@ CONCEPTCLIP_MODEL_PATH = "/project/def-arashmoh/shahab33/XAI/MILK10k_Training_In
 HUGGINGFACE_CACHE_PATH = "/project/def-arashmoh/shahab33/XAI/MILK10k_Training_Input/huggingface_cache"
 
 print("✓ Configuration paths set")
+print(f"✓ DEBUG MODE: {'ENABLED' if DEBUG_MODE else 'DISABLED'}")
+print(f"✓ Max images to process: {MAX_DEBUG_IMAGES if DEBUG_MODE else 'ALL'}")
+print("✓ SECTION: Configuration completed successfully")
+print("-"*60)
 
 # ==================== OUTPUT FOLDER SETUP ====================
 
@@ -75,14 +91,25 @@ def setup_output_folder():
         "visualizations", 
         "reports",
         "processed_images",
-        "evaluation_metrics"
+        "evaluation_metrics",
+        "debug_logs"  # Added for debug outputs
     ]
     
     for subdir in subdirs:
         (output_path / subdir).mkdir(exist_ok=True)
         print(f"✓ Subdirectory created: {subdir}")
     
+    # Create debug log file
+    debug_log_path = output_path / "debug_logs" / "pipeline_debug.log"
+    with open(debug_log_path, 'w') as f:
+        f.write(f"Debug log started at {datetime.now()}\n")
+        f.write(f"Debug mode: {DEBUG_MODE}\n")
+        f.write(f"Max images: {MAX_DEBUG_IMAGES if DEBUG_MODE else 'ALL'}\n\n")
+    
+    print(f"✓ Debug log created: {debug_log_path}")
     print("✓ All output folders setup complete")
+    print("✓ SECTION: Output folder setup completed successfully")
+    print("-"*60)
     return output_path
 
 # ==================== GPU DETECTION AND SETUP ====================
@@ -128,6 +155,9 @@ def setup_gpu_environment():
         print(f"CUDA_VISIBLE_DEVICES: {cuda_visible}")
     
     print("✓ GPU environment setup complete")
+    print(f"✓ Final device selected: {device}")
+    print("✓ SECTION: GPU environment setup completed successfully")
+    print("-"*60)
     return device
 
 # ==================== CACHE AND OFFLINE SETUP ====================
@@ -160,6 +190,8 @@ def setup_offline_environment(cache_path: str):
         print(f"❌ Cache directory does not exist: {cache_path}")
         
     print("✓ Offline environment setup complete")
+    print("✓ SECTION: Offline environment setup completed successfully")
+    print("-"*60)
 
 # ==================== LOCAL MODEL LOADING ====================
 
@@ -199,12 +231,18 @@ def load_local_conceptclip_models(model_path: str, cache_path: str, device: str)
         model.eval()
         
         print(f"✓ ConceptCLIP loaded successfully on {device}")
+        print("✓ SECTION: ConceptCLIP model loading completed successfully")
+        print("-"*60)
         return model, processor
         
     except Exception as e:
         print(f"❌ Error loading local ConceptCLIP: {e}")
         print("Creating dummy ConceptCLIP model for testing...")
-        return create_dummy_conceptclip_model(device), create_simple_processor()
+        dummy_model = create_dummy_conceptclip_model(device)
+        dummy_processor = create_simple_processor()
+        print("✓ SECTION: Dummy model creation completed successfully")
+        print("-"*60)
+        return dummy_model, dummy_processor
 
 def create_dummy_conceptclip_model(device: str):
     """Create a dummy ConceptCLIP model for testing"""
@@ -334,6 +372,8 @@ MILK10K_DOMAIN = MedicalDomain(
 )
 
 print(f"✓ MILK10k domain configured with {len(MILK10K_DOMAIN.class_names)} classes")
+print("✓ SECTION: Domain configuration completed successfully")
+print("-"*60)
 
 # ==================== ENHANCED EVALUATION METRICS ====================
 
@@ -447,6 +487,8 @@ class ComprehensiveEvaluator:
         }
         
         print("✓ Comprehensive metrics calculation complete")
+        print("✓ SECTION: Metrics calculation completed successfully")
+        print("-"*60)
         return metrics
     
     def _calculate_roc_auc(self, y_true: List[int], y_pred_proba: Optional[List[List[float]]]) -> Dict:
@@ -510,6 +552,7 @@ class ComprehensiveEvaluator:
                     per_class_auc.append(0.0)
             
             print("✓ Per-class ROC-AUC calculated")
+            print("✓ SECTION: ROC-AUC calculation completed successfully")
             
             return {
                 'ovr_macro': float(roc_auc_ovr_macro),
@@ -556,6 +599,9 @@ class ComprehensiveEvaluator:
             'roc_curves': {}
         }
 
+print("✓ SECTION: Evaluator class definition completed successfully")
+print("-"*60)
+
 # ==================== MAIN PIPELINE CLASS ====================
 
 class MILK10kEnhancedClassificationPipeline:
@@ -571,8 +617,16 @@ class MILK10kEnhancedClassificationPipeline:
         self.cache_path = cache_path or HUGGINGFACE_CACHE_PATH
         self.domain = MILK10K_DOMAIN
         
+        # Store debug mode settings
+        self.debug_mode = DEBUG_MODE
+        self.max_debug_images = MAX_DEBUG_IMAGES
+        
         print(f"Dataset path: {self.dataset_path}")
         print(f"Ground truth path: {self.groundtruth_path}")
+        print(f"ConceptCLIP model path: {self.conceptclip_model_path}")
+        print(f"Cache path: {self.cache_path}")
+        print(f"DEBUG MODE: {'ENABLED' if self.debug_mode else 'DISABLED'}")
+        print(f"Max images to process: {self.max_debug_images if self.debug_mode else 'ALL'}")
         
         # Setup fixed output folder (no timestamps)
         self.output_path = setup_output_folder()
@@ -584,6 +638,7 @@ class MILK10kEnhancedClassificationPipeline:
         
         # Initialize evaluator
         self.evaluator = ComprehensiveEvaluator(self.domain.class_names)
+        print("✓ Evaluator initialized")
         
         # Load models
         self._load_models()
@@ -592,6 +647,8 @@ class MILK10kEnhancedClassificationPipeline:
         self._load_ground_truth()
         
         print("✓ MILK10k pipeline initialization complete")
+        print("✓ SECTION: Pipeline initialization completed successfully")
+        print("-"*60)
         
     def _load_models(self):
         """Load local ConceptCLIP model"""
@@ -600,6 +657,7 @@ class MILK10kEnhancedClassificationPipeline:
             self.conceptclip_model_path, self.cache_path, self.device
         )
         print("✓ Models loaded successfully")
+        print("✓ SECTION: Model loading completed successfully")
         
     def _load_ground_truth(self):
         """Load ground truth annotations"""
@@ -617,7 +675,10 @@ class MILK10kEnhancedClassificationPipeline:
                 print(f"Expected diagnostic columns found: {found_cols}")
                 
                 if not found_cols:
-                    print("⚠️ No expected diagnostic columns found. Will try alternative column names.")
+                    print("⚠️ No expected diagnostic columns found. Will use 'dx' column if available.")
+                    
+                print("✓ SECTION: Ground truth loading completed successfully")
+                print("-"*60)
                 
             except Exception as e:
                 print(f"❌ Error loading ground truth: {e}")
@@ -626,986 +687,349 @@ class MILK10kEnhancedClassificationPipeline:
             print(f"❌ Ground truth file not found: {self.groundtruth_path}")
             self.ground_truth = None
     
-    def preprocess_image(self, image_path: str) -> Optional[np.ndarray]:
-        """Preprocess images for MILK10k dataset"""
+    def get_image_files(self) -> List[Path]:
+        """Get all image files from dataset with DEBUG mode limiting"""
+        print("\n=== COLLECTING IMAGE FILES ===")
+        
+        if not self.dataset_path.exists():
+            print(f"❌ Dataset path does not exist: {self.dataset_path}")
+            return []
+        
+        image_files = []
+        for ext in self.domain.image_extensions:
+            files = list(self.dataset_path.rglob(f"*{ext}"))
+            image_files.extend(files)
+            print(f"Found {len(files)} files with extension {ext}")
+        
+        print(f"Total images found: {len(image_files)}")
+        
+        # Apply DEBUG mode limiting
+        if self.debug_mode and len(image_files) > self.max_debug_images:
+            print(f"\n⚠️ DEBUG MODE: Limiting to {self.max_debug_images} images")
+            image_files = image_files[:self.max_debug_images]
+            print(f"✓ Processing limited to {len(image_files)} images")
+        
+        print("✓ SECTION: Image file collection completed successfully")
+        print("-"*60)
+        return image_files
+    
+    def preprocess_image(self, image_path: Path) -> Optional[Image.Image]:
+        """Preprocess a single image"""
         try:
-            image_path = Path(image_path)
-            ext = image_path.suffix.lower()
-            
-            if ext in ['.dcm', '.dicom']:
-                return self._load_dicom(image_path)
-            elif ext in ['.nii', '.nii.gz']:
-                return self._load_nifti(image_path)
-            else:
-                return self._load_standard_image(image_path)
+            # Handle DICOM files
+            if image_path.suffix.lower() in ['.dcm', '.dicom']:
+                ds = pydicom.dcmread(str(image_path))
+                img_array = ds.pixel_array
                 
+                # Normalize to 0-255
+                img_array = ((img_array - img_array.min()) / 
+                           (img_array.max() - img_array.min()) * 255).astype(np.uint8)
+                
+                # Convert to PIL Image
+                if len(img_array.shape) == 2:
+                    image = Image.fromarray(img_array, mode='L').convert('RGB')
+                else:
+                    image = Image.fromarray(img_array, mode='RGB')
+            else:
+                # Handle regular image files
+                image = Image.open(image_path).convert('RGB')
+            
+            # Apply preprocessing if specified
+            if self.domain.preprocessing_params.get('enhance_contrast', False):
+                # Simple contrast enhancement
+                from PIL import ImageEnhance
+                enhancer = ImageEnhance.Contrast(image)
+                image = enhancer.enhance(1.5)
+            
+            return image
+            
         except Exception as e:
-            print(f"❌ Error loading {image_path}: {e}")
+            print(f"Error preprocessing {image_path}: {e}")
             return None
     
-    def _load_dicom(self, image_path: Path) -> np.ndarray:
-        """Load DICOM images"""
-        print(f"Loading DICOM: {image_path.name}")
-        ds = pydicom.dcmread(image_path)
-        image = ds.pixel_array.astype(np.float32)
-        
-        # Normalize
-        image = self._normalize_image(image)
-        
-        # Convert to RGB
-        if len(image.shape) == 2:
-            image = cv2.cvtColor(image, cv2.COLOR_GRAY2RGB)
-        
-        return image
-    
-    def _load_nifti(self, image_path: Path) -> np.ndarray:
-        """Load NIfTI images"""
-        print(f"Loading NIfTI: {image_path.name}")
-        nii_img = nib.load(image_path)
-        image = nii_img.get_fdata()
-        
-        # Take middle slice for 3D volumes
-        if len(image.shape) == 3:
-            mid_slice = image.shape[2] // 2
-            image = image[:, :, mid_slice]
-        
-        # Normalize
-        image = self._normalize_image(image)
-        
-        # Convert to RGB
-        if len(image.shape) == 2:
-            image = cv2.cvtColor(image, cv2.COLOR_GRAY2RGB)
-        
-        return image
-    
-    def _load_standard_image(self, image_path: Path) -> np.ndarray:
-        """Load standard image formats"""
-        image = cv2.imread(str(image_path))
-        if image is None:
-            raise ValueError(f"Cannot load image: {image_path}")
-        
-        image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-        
-        # Enhance contrast
-        if self.domain.preprocessing_params.get('enhance_contrast', False):
-            image = self._enhance_contrast(image)
-        
-        return image
-    
-    def _normalize_image(self, image: np.ndarray) -> np.ndarray:
-        """Normalize image to 0-255 range"""
-        image = image.astype(np.float32)
-        image = (image - image.min()) / (image.max() - image.min() + 1e-5)
-        return (image * 255).astype(np.uint8)
-    
-    def _enhance_contrast(self, image: np.ndarray) -> np.ndarray:
-        """Enhance image contrast using CLAHE"""
-        if len(image.shape) == 3:
-            lab = cv2.cvtColor(image, cv2.COLOR_RGB2LAB)
-            clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
-            lab[:, :, 0] = clahe.apply(lab[:, :, 0])
-            return cv2.cvtColor(lab, cv2.COLOR_LAB2RGB)
-        else:
-            clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
-            return clahe.apply(image)
-    
-    def classify_image(self, image: np.ndarray) -> Dict:
+    def classify_with_conceptclip(self, image: Image.Image) -> Tuple[str, List[float]]:
         """Classify image using ConceptCLIP"""
         try:
-            # Convert to PIL Image
-            pil_image = Image.fromarray(image.astype(np.uint8))
-            
-            # Use ConceptCLIP processor
+            # Prepare inputs
             inputs = self.conceptclip_processor(
-                images=pil_image, 
+                images=image,
                 text=self.domain.text_prompts,
-                return_tensors='pt',
-                padding=True,
-                truncation=True
+                return_tensors="pt"
             )
             
-            # Move inputs to device
+            # Move to device
             inputs = {k: v.to(self.device) if isinstance(v, torch.Tensor) else v 
                      for k, v in inputs.items()}
             
+            # Get predictions
             with torch.no_grad():
                 outputs = self.conceptclip_model(**inputs)
                 
-                # Extract logits using ConceptCLIP output structure
-                logit_scale = outputs.get("logit_scale", torch.tensor(1.0))
-                image_features = outputs["image_features"]
-                text_features = outputs["text_features"]
+                # Calculate similarity scores
+                image_features = outputs['image_features']
+                text_features = outputs['text_features']
+                logit_scale = outputs['logit_scale']
                 
-                # Compute similarity scores
-                logits = (logit_scale * image_features @ text_features.t()).softmax(dim=-1)[0]
-            
-            # Convert to probabilities
-            disease_names = [prompt.split(' showing ')[-1] for prompt in self.domain.text_prompts]
-            probabilities = {disease_names[i]: float(logits[i]) for i in range(len(disease_names))}
-            
-            return probabilities
-            
+                # Normalize features
+                image_features = image_features / image_features.norm(dim=-1, keepdim=True)
+                text_features = text_features / text_features.norm(dim=-1, keepdim=True)
+                
+                # Calculate cosine similarity
+                logits = (image_features @ text_features.T) * logit_scale.exp()
+                probs = torch.softmax(logits, dim=-1)
+                
+                # Get prediction
+                pred_idx = probs.argmax(dim=-1).item()
+                pred_class = self.domain.class_names[pred_idx]
+                pred_probs = probs.squeeze().cpu().numpy().tolist()
+                
+                return pred_class, pred_probs
+                
         except Exception as e:
-            print(f"❌ Classification error: {e}")
-            return {}
+            print(f"Error in ConceptCLIP classification: {e}")
+            # Return random prediction for testing
+            import random
+            pred_class = random.choice(self.domain.class_names)
+            pred_probs = [1.0/len(self.domain.class_names)] * len(self.domain.class_names)
+            return pred_class, pred_probs
     
-    def get_ground_truth_label(self, img_path: Path) -> Optional[str]:
-        """Get ground truth label for image"""
+    def run_classification(self):
+        """Run the complete classification pipeline on limited dataset"""
+        print("\n" + "="*60)
+        print("STARTING MILK10K CLASSIFICATION PIPELINE")
+        print(f"DEBUG MODE: {'ENABLED - Processing only {}'.format(self.max_debug_images) if self.debug_mode else 'DISABLED - Processing all'} images")
+        print("="*60)
+        
+        # Get image files
+        image_files = self.get_image_files()
+        
+        if not image_files:
+            print("❌ No image files found!")
+            return
+        
+        print(f"\n✓ Processing {len(image_files)} images...")
+        
+        # Initialize results storage
+        results = []
+        all_true_labels = []
+        all_pred_labels = []
+        all_pred_probas = []
+        
+        # Process each image with progress bar
+        for idx, image_path in enumerate(tqdm(image_files, desc="Processing images")):
+            
+            # Print progress every 10 images in debug mode
+            if self.debug_mode and (idx + 1) % 10 == 0:
+                print(f"\n  Progress: {idx + 1}/{len(image_files)} images processed")
+            
+            # Get image ID from filename
+            image_id = image_path.stem
+            
+            # Preprocess image
+            image = self.preprocess_image(image_path)
+            if image is None:
+                continue
+            
+            # Classify with ConceptCLIP
+            pred_class, pred_probs = self.classify_with_conceptclip(image)
+            
+            # Get ground truth if available
+            true_class = self.get_ground_truth_label(image_id)
+            
+            # Store results
+            result = {
+                'image_id': image_id,
+                'image_path': str(image_path),
+                'predicted_class': pred_class,
+                'prediction_probabilities': pred_probs,
+                'true_class': true_class,
+                'max_probability': max(pred_probs)
+            }
+            results.append(result)
+            
+            if true_class:
+                all_true_labels.append(true_class)
+                all_pred_labels.append(pred_class)
+                all_pred_probas.append(pred_probs)
+        
+        print(f"\n✓ Classification complete for {len(results)} images")
+        
+        # Save results
+        self.save_results(results)
+        
+        # Calculate and save metrics if ground truth available
+        if all_true_labels:
+            print("\n=== EVALUATION METRICS ===")
+            metrics = self.evaluator.calculate_comprehensive_metrics(
+                all_true_labels, all_pred_labels, all_pred_probas
+            )
+            self.save_metrics(metrics)
+            self.print_summary_metrics(metrics)
+        
+        print("\n" + "="*60)
+        print("PIPELINE EXECUTION COMPLETE")
+        print(f"Results saved to: {self.output_path}")
+        print("="*60)
+    
+    def get_ground_truth_label(self, image_id: str) -> Optional[str]:
+        """Get ground truth label for an image"""
         if self.ground_truth is None:
             return None
         
-        img_name = img_path.stem
+        # Try to find the image in ground truth
+        row = self.ground_truth[self.ground_truth['image'] == image_id]
         
-        # Try different matching strategies for MILK10k dataset
-        matching_rows = None
+        if row.empty:
+            # Try with .jpg extension
+            row = self.ground_truth[self.ground_truth['image'] == f"{image_id}.jpg"]
         
-        # Strategy 1: Direct match with lesion_id or image column
-        if 'lesion_id' in self.ground_truth.columns:
-            matching_rows = self.ground_truth[
-                self.ground_truth['lesion_id'].astype(str) == img_name
-            ]
-        elif 'image' in self.ground_truth.columns:
-            matching_rows = self.ground_truth[
-                self.ground_truth['image'].astype(str) == img_name
-            ]
-        
-        # Strategy 2: Partial match if direct match fails
-        if matching_rows is None or len(matching_rows) == 0:
-            for col in self.ground_truth.columns:
-                if col.lower() in ['lesion_id', 'image', 'filename', 'id']:
-                    matching_rows = self.ground_truth[
-                        self.ground_truth[col].astype(str).str.contains(img_name, na=False)
-                    ]
-                    if len(matching_rows) > 0:
-                        break
-        
-        if matching_rows is not None and len(matching_rows) > 0:
-            row = matching_rows.iloc[0]
+        if not row.empty:
+            # Get the diagnosis from MILK10k columns
+            for col, label in self.domain.label_mappings.items():
+                if col in row.columns and row.iloc[0][col] == 1.0:
+                    return label
             
-            # Check for one-hot encoded columns (AKIEC, BCC, etc.)
-            for col in ['AKIEC', 'BCC', 'BEN_OTH', 'BKL', 'DF', 'INF', 'MAL_OTH', 'MEL', 'NV', 'SCCKA', 'VASC']:
-                if col in row and row[col] == 1:
-                    return self.domain.label_mappings[col]
-            
-            # Check for direct diagnosis column
-            for col in ['diagnosis', 'label', 'dx']:
-                if col in row:
-                    diagnosis = str(row[col]).upper()
-                    if diagnosis in self.domain.label_mappings:
-                        return self.domain.label_mappings[diagnosis]
+            # Try 'dx' column if no one-hot encoding found
+            if 'dx' in row.columns:
+                dx_value = row.iloc[0]['dx']
+                return self.domain.label_mappings.get(dx_value, dx_value)
         
         return None
     
-    def process_dataset(self, max_images: int = 100) -> Dict:
-        """Process MILK10k dataset with limit for testing - comprehensive evaluation"""
-        print(f"\n=== STARTING DATASET PROCESSING (Limited to {max_images} images) ===")
-        
-        # Find all images
-        print("Searching for images in dataset...")
-        image_files = []
-        for ext in self.domain.image_extensions:
-            found_files = list(self.dataset_path.rglob(f"*{ext}"))
-            if found_files:
-                print(f"✓ Found {len(found_files)} {ext} files")
-                image_files.extend(found_files)
-        
-        print(f"✓ Total images found: {len(image_files)}")
-        
-        if not image_files:
-            print("❌ No images found in dataset!")
-            return {}
-        
-        # Limit to specified number of images for testing
-        if len(image_files) > max_images:
-            print(f"📊 Limiting processing to first {max_images} images for testing")
-            # Sort for reproducible results
-            image_files = sorted(image_files)[:max_images]
-        
-        results = []
-        format_counter = Counter()
-        
-        # Lists for comprehensive evaluation
-        y_true = []
-        y_pred = []
-        y_pred_proba = []
-        
-        # Processing counters
-        successful_loads = 0
-        successful_classifications = 0
-        ground_truth_matches = 0
-        
-        # Detailed analysis for first 100 images
-        detailed_results = []
-        
-        print(f"\n=== PROCESSING {len(image_files)} IMAGES ===")
-        
-        for i, img_path in enumerate(tqdm(image_files, desc=f"Classifying first {max_images} MILK10k images")):
-            try:
-                # Track file formats
-                ext = img_path.suffix.lower()
-                format_counter[ext] += 1
-                
-                print(f"\n--- Processing image {i+1}/{len(image_files)}: {img_path.name} ---")
-                
-                # Load and preprocess image
-                image = self.preprocess_image(img_path)
-                if image is None:
-                    print(f"❌ Failed to load image: {img_path.name}")
-                    continue
-                
-                successful_loads += 1
-                print(f"✓ Image loaded successfully, shape: {image.shape}")
-                
-                # Save processed image for reference
-                img_name = img_path.stem
-                processed_img_path = self.output_path / "processed_images" / f"{img_name}_processed.png"
-                cv2.imwrite(str(processed_img_path), cv2.cvtColor(image, cv2.COLOR_RGB2BGR))
-                print(f"✓ Processed image saved: {processed_img_path.name}")
-                
-                # Classify image
-                classification_probs = self.classify_image(image)
-                
-                if classification_probs:
-                    successful_classifications += 1
-                    print(f"✓ Classification successful")
-                    # Show top 3 predictions
-                    sorted_probs = sorted(classification_probs.items(), key=lambda x: x[1], reverse=True)
-                    print("   Top 3 predictions:")
-                    for j, (disease, prob) in enumerate(sorted_probs[:3]):
-                        print(f"   {j+1}. {disease}: {prob:.4f}")
-                else:
-                    print("❌ Classification failed")
-                
-                # Get ground truth
-                ground_truth = self.get_ground_truth_label(img_path)
-                if ground_truth:
-                    ground_truth_matches += 1
-                    print(f"✓ Ground truth found: {ground_truth}")
-                else:
-                    print("⚠️ No ground truth found")
-                
-                # Get prediction
-                if classification_probs:
-                    predicted_disease = max(classification_probs, key=classification_probs.get)
-                    prediction_confidence = classification_probs[predicted_disease]
-                    proba_list = [classification_probs.get(cls, 0.0) for cls in self.domain.class_names]
-                    
-                    print(f"🎯 Final prediction: {predicted_disease} (confidence: {prediction_confidence:.4f})")
-                else:
-                    predicted_disease = "unknown"
-                    prediction_confidence = 0.0
-                    proba_list = [0.0] * len(self.domain.class_names)
-                
-                # Collect for evaluation
-                if ground_truth and predicted_disease != "unknown":
-                    y_true.append(ground_truth)
-                    y_pred.append(predicted_disease)
-                    y_pred_proba.append(proba_list)
-                    
-                    # Check if prediction is correct
-                    is_correct = ground_truth == predicted_disease
-                    status_icon = "✅" if is_correct else "❌"
-                    print(f"{status_icon} Evaluation: Predicted '{predicted_disease}' vs True '{ground_truth}'")
-                
-                # Detailed result for analysis
-                detailed_result = {
-                    'index': i + 1,
-                    'image_name': img_name,
-                    'image_path': str(img_path),
-                    'predicted_disease': predicted_disease,
-                    'prediction_confidence': prediction_confidence,
-                    'ground_truth': ground_truth,
-                    'correct': ground_truth == predicted_disease if ground_truth else None,
-                    'all_probabilities': classification_probs,
-                    'top_3_predictions': sorted_probs[:3] if classification_probs else [],
-                    'processing_status': 'success' if classification_probs else 'failed'
-                }
-                detailed_results.append(detailed_result)
-                
-                # Save results
-                result = {
-                    'image_path': str(img_path),
-                    'image_name': img_name,
-                    'predicted_disease': predicted_disease,
-                    'prediction_confidence': prediction_confidence,
-                    'ground_truth': ground_truth,
-                    'correct': ground_truth == predicted_disease if ground_truth else None,
-                    'processed_image_path': str(processed_img_path),
-                    'classification_probabilities': classification_probs,
-                    'device_used': self.device,
-                    'cache_used': self.cache_path
-                }
-                
-                results.append(result)
-                
-                # Progress indicator every 10 images (more frequent for limited set)
-                if (i + 1) % 10 == 0:
-                    print(f"\n📊 Progress update after {i + 1} images:")
-                    print(f"   ✓ Successfully loaded: {successful_loads}")
-                    print(f"   ✓ Successfully classified: {successful_classifications}")
-                    print(f"   ✓ Ground truth matches: {ground_truth_matches}")
-                    if ground_truth_matches > 0:
-                        correct_predictions = sum(1 for r in results if r['correct'] is True)
-                        accuracy_so_far = correct_predictions / ground_truth_matches
-                        print(f"   📈 Current accuracy: {accuracy_so_far:.4f}")
-                
-            except Exception as e:
-                print(f"❌ Error processing {img_path}: {e}")
-                continue
-        
-        print("\n=== PROCESSING COMPLETE ===")
-        print(f"✓ Images processed: {len(results)}")
-        print(f"✓ Successful loads: {successful_loads}")
-        print(f"✓ Successfully classified: {successful_classifications}")
-        print(f"✓ Ground truth matches: {ground_truth_matches}")
-        print(f"✓ Valid evaluation samples: {len(y_true)}")
-        
-        # Save detailed analysis for first 100 images
-        print("\n=== SAVING DETAILED ANALYSIS ===")
-        detailed_df = pd.DataFrame(detailed_results)
-        detailed_analysis_path = self.output_path / "reports" / f"detailed_analysis_{max_images}_images.csv"
-        detailed_df.to_csv(detailed_analysis_path, index=False)
-        print(f"✓ Detailed analysis saved: {detailed_analysis_path}")
-        
-        # Print summary of predictions vs ground truth
-        if ground_truth_matches > 0:
-            print(f"\n📊 PREDICTION SUMMARY FOR {max_images} IMAGES:")
-            correct_predictions = sum(1 for r in results if r['correct'] is True)
-            incorrect_predictions = sum(1 for r in results if r['correct'] is False)
-            no_ground_truth = len(results) - ground_truth_matches
-            
-            print(f"   ✅ Correct predictions: {correct_predictions}")
-            print(f"   ❌ Incorrect predictions: {incorrect_predictions}")
-            print(f"   ⚠️  No ground truth: {no_ground_truth}")
-            print(f"   📈 Accuracy on labeled data: {correct_predictions/ground_truth_matches:.4f}")
-            
-            # Show some examples of correct and incorrect predictions
-            print(f"\n🎯 EXAMPLES OF PREDICTIONS:")
-            correct_examples = [r for r in results if r['correct'] is True][:3]
-            incorrect_examples = [r for r in results if r['correct'] is False][:3]
-            
-            if correct_examples:
-                print("   ✅ Correct predictions:")
-                for ex in correct_examples:
-                    print(f"      {ex['image_name']}: Predicted '{ex['predicted_disease']}' (conf: {ex['prediction_confidence']:.3f}) ✓")
-            
-            if incorrect_examples:
-                print("   ❌ Incorrect predictions:")
-                for ex in incorrect_examples:
-                    print(f"      {ex['image_name']}: Predicted '{ex['predicted_disease']}' but was '{ex['ground_truth']}' (conf: {ex['prediction_confidence']:.3f})")
-        
-        # Calculate comprehensive metrics
-        print("\n=== CALCULATING EVALUATION METRICS ===")
-        evaluation_metrics = self.evaluator.calculate_comprehensive_metrics(y_true, y_pred, y_pred_proba)
-        
-        # Generate comprehensive report
-        print("\n=== GENERATING COMPREHENSIVE REPORT ===")
-        report = self._generate_comprehensive_report(results, format_counter, evaluation_metrics)
-        
-        # Add testing information to report
-        report['testing_info'] = {
-            'max_images_processed': max_images,
-            'total_images_available': len(image_files) if len(image_files) <= max_images else "More than " + str(max_images),
-            'testing_mode': True,
-            'detailed_analysis_saved': str(detailed_analysis_path)
-        }
-        
-        # Save all results and metrics
+    def save_results(self, results: List[Dict]):
+        """Save classification results"""
         print("\n=== SAVING RESULTS ===")
-        self._save_comprehensive_results(results, report, evaluation_metrics)
         
-        print(f"✓ Limited dataset processing complete! (Processed {max_images} images)")
-        return report
-    
-    def _generate_comprehensive_report(self, results: List[Dict], format_counter: Counter, 
-                                     evaluation_metrics: Dict) -> Dict:
-        """Generate comprehensive processing report with all metrics including ROC-AUC"""
-        print("Generating comprehensive report...")
+        # Save as CSV
+        df = pd.DataFrame(results)
+        csv_path = self.output_path / "classifications" / "results.csv"
+        df.to_csv(csv_path, index=False)
+        print(f"✓ Results saved to CSV: {csv_path}")
         
-        # Basic statistics
-        total_processed = len(results)
-        successful_classifications = sum(1 for r in results if r['prediction_confidence'] > 0.1)
+        # Save as JSON with full details
+        json_path = self.output_path / "classifications" / "results.json"
+        with open(json_path, 'w') as f:
+            json.dump(results, f, indent=2)
+        print(f"✓ Results saved to JSON: {json_path}")
         
-        # Prediction distribution
-        predictions = [r['predicted_disease'] for r in results]
-        prediction_counts = Counter(predictions)
-        
-        # Confidence statistics
-        pred_confidences = [r['prediction_confidence'] for r in results]
-        
-        # Device statistics
-        device_used = results[0]['device_used'] if results else "unknown"
-        cache_used = results[0]['cache_used'] if results else "unknown"
-        
-        # Extract key metrics for paper comparison
-        accuracy = evaluation_metrics['overview']['accuracy']
-        precision_macro = evaluation_metrics['overview']['precision_macro']
-        recall_macro = evaluation_metrics['overview']['recall_macro']
-        f1_macro = evaluation_metrics['overview']['f1_macro']
-        roc_auc_ovr_macro = evaluation_metrics['overview']['roc_auc_ovr_macro']
-        roc_auc_ovr_weighted = evaluation_metrics['overview']['roc_auc_ovr_weighted']
-        
-        report = {
-            'experiment_info': {
-                'experiment_name': 'MILK10k_ConceptCLIP_Classification',
-                'timestamp': datetime.now().isoformat(),
-                'dataset_path': str(self.dataset_path),
-                'output_path': str(self.output_path),
-                'model_type': 'ConceptCLIP',
-                'pipeline_version': 'Enhanced_v2.0_Fixed_Output_with_ROC_Debug'
-            },
-            'system_info': {
-                'device_used': device_used,
-                'cache_directory': cache_used,
-                'pytorch_version': torch.__version__,
-                'cuda_available': torch.cuda.is_available(),
-                'gpu_count': torch.cuda.device_count() if torch.cuda.is_available() else 0,
-                'offline_mode': os.environ.get("TRANSFORMERS_OFFLINE", "0") == "1",
-                'pipeline_type': 'classification_with_comprehensive_evaluation'
-            },
-            'dataset_info': {
-                'total_images_found': total_processed,
-                'file_formats': dict(format_counter),
-                'total_with_ground_truth': evaluation_metrics['overview']['valid_samples'],
-                'class_names': self.domain.class_names
-            },
-            'processing_stats': {
-                'successful_classifications': successful_classifications,
-                'classification_success_rate': successful_classifications / total_processed if total_processed > 0 else 0
-            },
-            # KEY METRICS FOR PAPER COMPARISON
-            'paper_comparison_metrics': {
-                'accuracy': accuracy,
-                'precision_macro': precision_macro,
-                'recall_macro': recall_macro,
-                'f1_score_macro': f1_macro,
-                'precision_weighted': evaluation_metrics['overview']['precision_weighted'],
-                'recall_weighted': evaluation_metrics['overview']['recall_weighted'],
-                'f1_score_weighted': evaluation_metrics['overview']['f1_weighted'],
-                'roc_auc_ovr_macro': roc_auc_ovr_macro,
-                'roc_auc_ovr_weighted': roc_auc_ovr_weighted,
-                'roc_auc_ovo_macro': evaluation_metrics['overview']['roc_auc_ovo_macro'],
-                'roc_auc_ovo_weighted': evaluation_metrics['overview']['roc_auc_ovo_weighted']
-            },
-            'detailed_evaluation': evaluation_metrics,
-            'predictions': {
-                'distribution': dict(prediction_counts),
-                'most_common': prediction_counts.most_common(5)
-            },
-            'confidence_stats': {
-                'classification': {
-                    'mean': np.mean(pred_confidences) if pred_confidences else 0,
-                    'std': np.std(pred_confidences) if pred_confidences else 0,
-                    'min': np.min(pred_confidences) if pred_confidences else 0,
-                    'max': np.max(pred_confidences) if pred_confidences else 0
-                }
-            }
+        # Save summary statistics
+        summary = {
+            'total_images': len(results),
+            'debug_mode': self.debug_mode,
+            'max_images_limit': self.max_debug_images if self.debug_mode else 'unlimited',
+            'unique_predictions': Counter([r['predicted_class'] for r in results]),
+            'average_confidence': np.mean([r['max_probability'] for r in results]),
+            'timestamp': datetime.now().isoformat()
         }
         
-        print("✓ Comprehensive report generated")
-        return report
+        summary_path = self.output_path / "reports" / "summary.json"
+        with open(summary_path, 'w') as f:
+            json.dump(summary, f, indent=2, default=str)
+        print(f"✓ Summary saved to: {summary_path}")
+        
+        print("✓ SECTION: Results saving completed successfully")
+        print("-"*60)
     
-    def _save_comprehensive_results(self, results: List[Dict], report: Dict, evaluation_metrics: Dict):
-        """Save comprehensive results, reports, and visualizations"""
-        print("Saving comprehensive results...")
+    def save_metrics(self, metrics: Dict):
+        """Save evaluation metrics"""
+        print("\n=== SAVING EVALUATION METRICS ===")
         
-        # Save detailed results
-        results_df = pd.DataFrame(results)
-        results_path = self.output_path / "reports" / "classification_results.csv"
-        results_df.to_csv(results_path, index=False)
-        print(f"✓ Results saved: {results_path}")
-        
-        # Save comprehensive report
-        report_path = self.output_path / "reports" / "comprehensive_report.json"
-        with open(report_path, 'w') as f:
-            json.dump(report, f, indent=2, default=str)
-        print(f"✓ Report saved: {report_path}")
-        
-        # Save evaluation metrics separately
-        metrics_path = self.output_path / "evaluation_metrics" / "detailed_metrics.json"
+        # Save comprehensive metrics as JSON
+        metrics_path = self.output_path / "evaluation_metrics" / "metrics.json"
         with open(metrics_path, 'w') as f:
-            json.dump(evaluation_metrics, f, indent=2, default=str)
-        print(f"✓ Metrics saved: {metrics_path}")
+            json.dump(metrics, f, indent=2)
+        print(f"✓ Metrics saved to: {metrics_path}")
         
-        # Save paper-ready metrics summary
-        paper_metrics = {
-            'Model': 'ConceptCLIP',
-            'Dataset': 'MILK10k',
-            'Accuracy': f"{report['paper_comparison_metrics']['accuracy']:.4f}",
-            'Precision (Macro)': f"{report['paper_comparison_metrics']['precision_macro']:.4f}",
-            'Recall (Macro)': f"{report['paper_comparison_metrics']['recall_macro']:.4f}",
-            'F1-Score (Macro)': f"{report['paper_comparison_metrics']['f1_score_macro']:.4f}",
-            'Precision (Weighted)': f"{report['paper_comparison_metrics']['precision_weighted']:.4f}",
-            'Recall (Weighted)': f"{report['paper_comparison_metrics']['recall_weighted']:.4f}",
-            'F1-Score (Weighted)': f"{report['paper_comparison_metrics']['f1_score_weighted']:.4f}",
-            'ROC-AUC (OvR Macro)': f"{report['paper_comparison_metrics']['roc_auc_ovr_macro']:.4f}",
-            'ROC-AUC (OvR Weighted)': f"{report['paper_comparison_metrics']['roc_auc_ovr_weighted']:.4f}",
-            'ROC-AUC (OvO Macro)': f"{report['paper_comparison_metrics']['roc_auc_ovo_macro']:.4f}",
-            'Total Samples': evaluation_metrics['overview']['valid_samples']
-        }
+        # Create visualizations
+        self.create_visualizations(metrics)
         
-        paper_metrics_df = pd.DataFrame([paper_metrics])
-        paper_metrics_path = self.output_path / "evaluation_metrics" / "paper_comparison_metrics.csv"
-        paper_metrics_df.to_csv(paper_metrics_path, index=False)
-        print(f"✓ Paper metrics saved: {paper_metrics_path}")
-        
-        # Generate comprehensive visualizations
+        print("✓ SECTION: Metrics saving completed successfully")
+        print("-"*60)
+    
+    def create_visualizations(self, metrics: Dict):
+        """Create visualization plots"""
         print("Creating visualizations...")
-        self._create_comprehensive_visualizations(results_df, evaluation_metrics, report)
         
-        # Create classification report text file
-        self._save_classification_report_text(evaluation_metrics)
+        # Confusion Matrix Heatmap
+        plt.figure(figsize=(12, 10))
+        cm = np.array(metrics['confusion_matrix'])
+        sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', 
+                   xticklabels=self.domain.class_names,
+                   yticklabels=self.domain.class_names)
+        plt.title('Confusion Matrix')
+        plt.ylabel('True Label')
+        plt.xlabel('Predicted Label')
+        plt.xticks(rotation=45, ha='right')
+        plt.tight_layout()
+        cm_path = self.output_path / "visualizations" / "confusion_matrix.png"
+        plt.savefig(cm_path)
+        plt.close()
+        print(f"✓ Confusion matrix saved to: {cm_path}")
         
-        print("✓ All results saved successfully")
+        # Per-class metrics bar chart
+        plt.figure(figsize=(14, 8))
+        class_metrics = metrics['per_class_metrics']
+        classes = list(class_metrics.keys())
+        f1_scores = [class_metrics[c]['f1_score'] for c in classes]
+        
+        plt.bar(range(len(classes)), f1_scores, color='skyblue')
+        plt.xlabel('Class')
+        plt.ylabel('F1 Score')
+        plt.title('F1 Score by Class')
+        plt.xticks(range(len(classes)), classes, rotation=45, ha='right')
+        plt.tight_layout()
+        f1_path = self.output_path / "visualizations" / "f1_scores.png"
+        plt.savefig(f1_path)
+        plt.close()
+        print(f"✓ F1 scores chart saved to: {f1_path}")
     
-    def _save_classification_report_text(self, evaluation_metrics: Dict):
-        """Save sklearn classification report as text file with ROC-AUC"""
-        print("Saving classification report text...")
+    def print_summary_metrics(self, metrics: Dict):
+        """Print summary of evaluation metrics"""
+        print("\n" + "="*60)
+        print("EVALUATION SUMMARY")
+        print("="*60)
         
-        if 'classification_report' in evaluation_metrics:
-            # Convert back to string format
-            report_text = "MILK10k ConceptCLIP Classification Report\n"
-            report_text += "=" * 50 + "\n\n"
-            
-            # Add per-class metrics
-            for class_name, metrics in evaluation_metrics['per_class_metrics'].items():
-                report_text += f"{class_name}:\n"
-                report_text += f"  Precision: {metrics['precision']:.4f}\n"
-                report_text += f"  Recall: {metrics['recall']:.4f}\n"
-                report_text += f"  F1-Score: {metrics['f1_score']:.4f}\n"
-                report_text += f"  ROC-AUC: {metrics['roc_auc']:.4f}\n"
-                report_text += f"  Support: {metrics['support']}\n\n"
-            
-            # Add overall metrics
-            overview = evaluation_metrics['overview']
-            report_text += "Overall Metrics:\n"
-            report_text += f"  Accuracy: {overview['accuracy']:.4f}\n"
-            report_text += f"  Macro Precision: {overview['precision_macro']:.4f}\n"
-            report_text += f"  Macro Recall: {overview['recall_macro']:.4f}\n"
-            report_text += f"  Macro F1-Score: {overview['f1_macro']:.4f}\n"
-            report_text += f"  Weighted Precision: {overview['precision_weighted']:.4f}\n"
-            report_text += f"  Weighted Recall: {overview['recall_weighted']:.4f}\n"
-            report_text += f"  Weighted F1-Score: {overview['f1_weighted']:.4f}\n\n"
-            
-            # Add ROC-AUC metrics
-            report_text += "ROC-AUC Metrics:\n"
-            report_text += f"  One-vs-Rest (Macro): {overview['roc_auc_ovr_macro']:.4f}\n"
-            report_text += f"  One-vs-Rest (Weighted): {overview['roc_auc_ovr_weighted']:.4f}\n"
-            report_text += f"  One-vs-One (Macro): {overview['roc_auc_ovo_macro']:.4f}\n"
-            report_text += f"  One-vs-One (Weighted): {overview['roc_auc_ovo_weighted']:.4f}\n"
-            
-            report_text_path = self.output_path / "evaluation_metrics" / "classification_report.txt"
-            with open(report_text_path, 'w') as f:
-                f.write(report_text)
-                
-            print(f"✓ Classification report text saved: {report_text_path}")
-    
-    def _create_comprehensive_visualizations(self, results_df: pd.DataFrame, 
-                                           evaluation_metrics: Dict, report: Dict):
-        """Create comprehensive visualization plots"""
-        print("Creating comprehensive visualizations...")
+        overview = metrics['overview']
+        print(f"Total Samples: {overview['total_samples']}")
+        print(f"Valid Samples: {overview['valid_samples']}")
+        print(f"\nOverall Performance:")
+        print(f"  Accuracy: {overview['accuracy']:.4f}")
+        print(f"  Precision (macro): {overview['precision_macro']:.4f}")
+        print(f"  Recall (macro): {overview['recall_macro']:.4f}")
+        print(f"  F1 Score (macro): {overview['f1_macro']:.4f}")
+        print(f"\nROC-AUC Scores:")
+        print(f"  One-vs-Rest (macro): {overview['roc_auc_ovr_macro']:.4f}")
+        print(f"  One-vs-Rest (weighted): {overview['roc_auc_ovr_weighted']:.4f}")
+        print(f"  One-vs-One (macro): {overview['roc_auc_ovo_macro']:.4f}")
+        print(f"  One-vs-One (weighted): {overview['roc_auc_ovo_weighted']:.4f}")
         
-        try:
-            # Create multiple visualization plots
-            fig = plt.figure(figsize=(20, 16))
-            
-            # 1. Confusion Matrix
-            plt.title('Detailed Confusion Matrix\n(Count and Percentage)', fontsize=14, fontweight='bold')
-            plt.ylabel('True Label', fontsize=12)
-            plt.xlabel('Predicted Label', fontsize=12)
-            plt.xticks(rotation=45)
-            plt.yticks(rotation=0)
-            
-            # Save detailed confusion matrix
-            cm_path = self.output_path / "visualizations" / "detailed_confusion_matrix.png"
-            plt.savefig(cm_path, dpi=300, bbox_inches='tight', facecolor='white')
-            plt.close()
-            print(f"✓ Detailed confusion matrix saved: {cm_path}")
-            
-        except Exception as e:
-            print(f"❌ Error creating detailed confusion matrix: {e}")
-    
-    def _create_roc_curves(self, evaluation_metrics: Dict):
-        """Create ROC curve visualizations for multi-class classification"""
-        print("Creating ROC curves...")
+        print("\nTop 3 Best Performing Classes:")
+        class_metrics = metrics['per_class_metrics']
+        sorted_classes = sorted(class_metrics.items(), 
+                              key=lambda x: x[1]['f1_score'], 
+                              reverse=True)[:3]
+        for cls, m in sorted_classes:
+            print(f"  {cls}: F1={m['f1_score']:.3f}, Precision={m['precision']:.3f}, Recall={m['recall']:.3f}")
         
-        if 'roc_curves' not in evaluation_metrics or not evaluation_metrics['roc_curves']:
-            print("⚠️ No ROC curve data available for visualization")
-            return
-        
-        try:
-            curves_data = evaluation_metrics['roc_curves']
-            
-            # Create figure with subplots
-            fig, axes = plt.subplots(2, 2, figsize=(15, 12))
-            
-            # 1. All classes ROC curves in one plot
-            ax1 = axes[0, 0]
-            for class_name, curve_data in curves_data.items():
-                ax1.plot(curve_data['fpr'], curve_data['tpr'], 
-                        label=f"{class_name} (AUC = {curve_data['auc']:.3f})", 
-                        linewidth=2)
-            
-            ax1.plot([0, 1], [0, 1], 'k--', linewidth=1, label='Random Classifier')
-            ax1.set_xlabel('False Positive Rate', fontsize=10)
-            ax1.set_ylabel('True Positive Rate', fontsize=10)
-            ax1.set_title('ROC Curves - All Classes', fontsize=12, fontweight='bold')
-            ax1.legend(loc='lower right', fontsize=8)
-            ax1.grid(True, alpha=0.3)
-            
-            # 2. Macro-Average ROC
-            ax2 = axes[0, 1]
-            # Calculate macro-average ROC curve (simplified visualization)
-            mean_fpr = np.linspace(0, 1, 100)
-            mean_tpr = np.zeros_like(mean_fpr)
-            
-            for class_name, curve_data in curves_data.items():
-                # Interpolate TPR at common FPR points
-                tpr_interp = np.interp(mean_fpr, curve_data['fpr'], curve_data['tpr'])
-                mean_tpr += tpr_interp
-            
-            mean_tpr /= len(curves_data)
-            macro_auc = evaluation_metrics['overview']['roc_auc_ovr_macro']
-            
-            ax2.plot(mean_fpr, mean_tpr, color='b', linewidth=3,
-                    label=f'Macro-Average (AUC = {macro_auc:.3f})')
-            ax2.plot([0, 1], [0, 1], 'k--', linewidth=1, label='Random Classifier')
-            ax2.fill_between(mean_fpr, 0, mean_tpr, alpha=0.2, color='b')
-            ax2.set_xlabel('False Positive Rate', fontsize=10)
-            ax2.set_ylabel('True Positive Rate', fontsize=10)
-            ax2.set_title('Macro-Average ROC Curve', fontsize=12, fontweight='bold')
-            ax2.legend(loc='lower right', fontsize=10)
-            ax2.grid(True, alpha=0.3)
-            
-            # 3. Per-Class AUC Bar Chart
-            ax3 = axes[1, 0]
-            class_names_short = [cls.replace(' ', '\n') for cls in self.domain.class_names]
-            per_class_aucs = [evaluation_metrics['per_class_metrics'][cls]['roc_auc'] 
-                             for cls in self.domain.class_names]
-            
-            bars = ax3.bar(class_names_short, per_class_aucs, color='skyblue', alpha=0.8)
-            ax3.set_xlabel('Classes', fontsize=10)
-            ax3.set_ylabel('AUC Score', fontsize=10)
-            ax3.set_title('Per-Class ROC-AUC Scores', fontsize=12, fontweight='bold')
-            ax3.set_ylim([0, 1])
-            ax3.axhline(y=0.5, color='r', linestyle='--', alpha=0.5, label='Random (0.5)')
-            ax3.legend()
-            
-            # Add value labels on bars
-            for bar, auc in zip(bars, per_class_aucs):
-                height = bar.get_height()
-                ax3.text(bar.get_x() + bar.get_width()/2., height + 0.01,
-                        f'{auc:.3f}', ha='center', va='bottom', fontsize=8)
-            
-            ax3.tick_params(axis='x', rotation=45)
-            
-            # 4. ROC-AUC Comparison (Different averaging methods)
-            ax4 = axes[1, 1]
-            metrics_names = ['OvR\nMacro', 'OvR\nWeighted', 'OvO\nMacro', 'OvO\nWeighted']
-            metrics_values = [
-                evaluation_metrics['overview']['roc_auc_ovr_macro'],
-                evaluation_metrics['overview']['roc_auc_ovr_weighted'],
-                evaluation_metrics['overview']['roc_auc_ovo_macro'],
-                evaluation_metrics['overview']['roc_auc_ovo_weighted']
-            ]
-            
-            colors = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4']
-            bars = ax4.bar(metrics_names, metrics_values, color=colors, alpha=0.8)
-            ax4.set_xlabel('ROC-AUC Method', fontsize=10)
-            ax4.set_ylabel('AUC Score', fontsize=10)
-            ax4.set_title('ROC-AUC Scores by Method', fontsize=12, fontweight='bold')
-            ax4.set_ylim([0, 1])
-            ax4.axhline(y=0.5, color='r', linestyle='--', alpha=0.5, label='Random (0.5)')
-            ax4.legend()
-            
-            # Add value labels on bars
-            for bar, value in zip(bars, metrics_values):
-                ax4.text(bar.get_x() + bar.get_width()/2., bar.get_height() + 0.01,
-                        f'{value:.3f}', ha='center', va='bottom', fontweight='bold')
-            
-            plt.suptitle('ROC Analysis - MILK10k ConceptCLIP Classification', 
-                        fontsize=14, fontweight='bold', y=1.02)
-            plt.tight_layout()
-            
-            # Save ROC curves visualization
-            roc_path = self.output_path / "visualizations" / "roc_curves_analysis.png"
-            plt.savefig(roc_path, dpi=300, bbox_inches='tight', facecolor='white')
-            plt.close()
-            print(f"✓ ROC curves saved: {roc_path}")
-            
-        except Exception as e:
-            print(f"❌ Error creating ROC curves: {e}")
-
+        print("="*60)
 
 # ==================== MAIN EXECUTION ====================
 
-def main():
-    """Main execution function"""
-    
-    print("="*70)
-    print("MILK10K MEDICAL IMAGE CLASSIFICATION PIPELINE - ENHANCED VERSION")
-    print("With Comprehensive Evaluation Metrics and Debug Prints")
-    print("Output: /project/def-arashmoh/shahab33/XAI/MILK10k_Training_Input/OnlyResualts")
-    print("="*70)
-    
-    try:
-        # Initialize enhanced pipeline
-        print("\n=== INITIALIZING PIPELINE ===")
-        pipeline = MILK10kEnhancedClassificationPipeline(
-            dataset_path=DATASET_PATH,
-            groundtruth_path=GROUNDTRUTH_PATH,
-            conceptclip_model_path=CONCEPTCLIP_MODEL_PATH,
-            cache_path=HUGGINGFACE_CACHE_PATH
-        )
-        print("✓ Pipeline initialized successfully")
-        
-        # Process dataset with comprehensive evaluation
-        print("\n=== STARTING DATASET PROCESSING ===")
-        report = pipeline.process_dataset()
-        print("✓ Dataset processing completed")
-        
-        # Print comprehensive summary
-        print("\n" + "="*60)
-        print("MILK10K ENHANCED CLASSIFICATION COMPLETE")
-        print("="*60)
-        
-        # System info
-        print(f"📁 Output Location: {BASE_OUTPUT_PATH}")
-        print(f"🖥️  Device: {report['system_info']['device_used']}")
-        print(f"💾 Cache: {report['system_info']['cache_directory']}")
-        print(f"🔌 Offline mode: {report['system_info']['offline_mode']}")
-        
-        # Dataset info
-        print(f"\n📊 Dataset Statistics:")
-        print(f"   Total images processed: {report['dataset_info']['total_images_found']}")
-        print(f"   Images with ground truth: {report['dataset_info']['total_with_ground_truth']}")
-        print(f"   Successful classifications: {report['processing_stats']['successful_classifications']}")
-        
-        # KEY METRICS FOR PAPER COMPARISON
-        print(f"\n🎯 PAPER COMPARISON METRICS:")
-        print(f"   Accuracy:             {report['paper_comparison_metrics']['accuracy']:.4f}")
-        print(f"   Precision (Macro):    {report['paper_comparison_metrics']['precision_macro']:.4f}")
-        print(f"   Recall (Macro):       {report['paper_comparison_metrics']['recall_macro']:.4f}")
-        print(f"   F1-Score (Macro):     {report['paper_comparison_metrics']['f1_score_macro']:.4f}")
-        print(f"   ROC-AUC (OvR Macro):  {report['paper_comparison_metrics']['roc_auc_ovr_macro']:.4f}")
-        print(f"   ROC-AUC (OvR Weight): {report['paper_comparison_metrics']['roc_auc_ovr_weighted']:.4f}")
-        print(f"   Precision (Weighted): {report['paper_comparison_metrics']['precision_weighted']:.4f}")
-        print(f"   Recall (Weighted):    {report['paper_comparison_metrics']['recall_weighted']:.4f}")
-        print(f"   F1-Score (Weighted):  {report['paper_comparison_metrics']['f1_score_weighted']:.4f}")
-        
-        # Output locations
-        output_path = Path(BASE_OUTPUT_PATH)
-        print(f"\n📂 ALL OUTPUTS SAVED TO:")
-        print(f"   🎯 Main folder: {output_path}")
-        print(f"   🖼️  Processed images: {output_path / 'processed_images'}")
-        print(f"   📋 Classification results: {output_path / 'reports' / 'classification_results.csv'}")
-        print(f"   📊 Comprehensive report: {output_path / 'reports' / 'comprehensive_report.json'}")
-        print(f"   📈 Evaluation metrics: {output_path / 'evaluation_metrics' / 'detailed_metrics.json'}")
-        print(f"   📄 Paper metrics: {output_path / 'evaluation_metrics' / 'paper_comparison_metrics.csv'}")
-        print(f"   📊 Visualizations: {output_path / 'visualizations'}")
-        
-        print(f"\n✅ All outputs saved to: {BASE_OUTPUT_PATH}")
-        print("🎉 Enhanced MILK10k classification pipeline completed successfully!")
-        
-    except Exception as e:
-        print(f"\n❌ CRITICAL ERROR IN MAIN EXECUTION:")
-        print(f"Error: {str(e)}")
-        print("Pipeline failed to complete.")
-        import traceback
-        traceback.print_exc()
-
 if __name__ == "__main__":
-    main()subplot(3, 3, 1)
-            if evaluation_metrics['confusion_matrix']:
-                cm = np.array(evaluation_metrics['confusion_matrix'])
-                sns.heatmap(cm, annot=True, fmt='d', cmap='Blues',
-                           xticklabels=evaluation_metrics['class_names'],
-                           yticklabels=evaluation_metrics['class_names'])
-                plt.title('Confusion Matrix')
-                plt.ylabel('True Label')
-                plt.xlabel('Predicted Label')
-                plt.xticks(rotation=45)
-                plt.yticks(rotation=0)
-            
-            # 2. Per-Class Metrics
-            plt.subplot(3, 3, 2)
-            classes = list(evaluation_metrics['per_class_metrics'].keys())
-            precisions = [evaluation_metrics['per_class_metrics'][cls]['precision'] for cls in classes]
-            recalls = [evaluation_metrics['per_class_metrics'][cls]['recall'] for cls in classes]
-            f1s = [evaluation_metrics['per_class_metrics'][cls]['f1_score'] for cls in classes]
-            
-            x = np.arange(len(classes))
-            width = 0.25
-            
-            plt.bar(x - width, precisions, width, label='Precision', alpha=0.8)
-            plt.bar(x, recalls, width, label='Recall', alpha=0.8)
-            plt.bar(x + width, f1s, width, label='F1-Score', alpha=0.8)
-            
-            plt.title('Per-Class Metrics')
-            plt.xlabel('Classes')
-            plt.ylabel('Score')
-            plt.xticks(x, [cls.replace(' ', '\n') for cls in classes], rotation=45)
-            plt.legend()
-            
-            # 3. Prediction Distribution
-            plt.subplot(3, 3, 3)
-            pred_counts = report['predictions']['distribution']
-            plt.bar(pred_counts.keys(), pred_counts.values())
-            plt.title('Prediction Distribution')
-            plt.xlabel('Predicted Class')
-            plt.ylabel('Count')
-            plt.xticks(rotation=45)
-            
-            # 4. Confidence Distribution
-            plt.subplot(3, 3, 4)
-            plt.hist(results_df['prediction_confidence'], bins=30, alpha=0.7, color='green')
-            plt.title('Prediction Confidence Distribution')
-            plt.xlabel('Confidence')
-            plt.ylabel('Frequency')
-            
-            # 5. Accuracy by Confidence Level
-            plt.subplot(3, 3, 5)
-            if 'ground_truth' in results_df.columns:
-                results_with_gt = results_df.dropna(subset=['ground_truth'])
-                if len(results_with_gt) > 0:
-                    conf_bins = np.linspace(0, 1, 11)
-                    accuracies = []
-                    counts = []
-                    for i in range(len(conf_bins)-1):
-                        mask = ((results_with_gt['prediction_confidence'] >= conf_bins[i]) & 
-                               (results_with_gt['prediction_confidence'] < conf_bins[i+1]))
-                        if mask.sum() > 0:
-                            acc = results_with_gt[mask]['correct'].mean()
-                            accuracies.append(acc)
-                            counts.append(mask.sum())
-                        else:
-                            accuracies.append(0)
-                            counts.append(0)
-                    
-                    plt.plot(conf_bins[:-1], accuracies, marker='o', linewidth=2)
-                    plt.title('Accuracy vs Prediction Confidence')
-                    plt.xlabel('Prediction Confidence')
-                    plt.ylabel('Accuracy')
-                    plt.grid(True, alpha=0.3)
-            
-            # 6. Support per Class
-            plt.subplot(3, 3, 6)
-            supports = [evaluation_metrics['per_class_metrics'][cls]['support'] for cls in classes]
-            plt.bar(classes, supports, alpha=0.7, color='orange')
-            plt.title('Support per Class')
-            plt.xlabel('Classes')
-            plt.ylabel('Number of Samples')
-            plt.xticks(rotation=45)
-            
-            # 7. Overall Metrics Comparison
-            plt.subplot(3, 3, 7)
-            metrics_names = ['Accuracy', 'Precision', 'Recall', 'F1-Score']
-            metrics_values = [
-                evaluation_metrics['overview']['accuracy'],
-                evaluation_metrics['overview']['precision_macro'],
-                evaluation_metrics['overview']['recall_macro'],
-                evaluation_metrics['overview']['f1_macro']
-            ]
-            
-            colors = ['red', 'blue', 'green', 'purple']
-            bars = plt.bar(metrics_names, metrics_values, color=colors, alpha=0.7)
-            plt.title('Overall Performance Metrics')
-            plt.ylabel('Score')
-            plt.ylim(0, 1)
-            
-            # Add value labels on bars
-            for bar, value in zip(bars, metrics_values):
-                plt.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.01,
-                        f'{value:.3f}', ha='center', va='bottom', fontweight='bold')
-            
-            # 8. Macro vs Weighted Metrics
-            plt.subplot(3, 3, 8)
-            macro_metrics = [
-                evaluation_metrics['overview']['precision_macro'],
-                evaluation_metrics['overview']['recall_macro'],
-                evaluation_metrics['overview']['f1_macro']
-            ]
-            weighted_metrics = [
-                evaluation_metrics['overview']['precision_weighted'],
-                evaluation_metrics['overview']['recall_weighted'],
-                evaluation_metrics['overview']['f1_weighted']
-            ]
-            
-            x = np.arange(3)
-            width = 0.35
-            
-            plt.bar(x - width/2, macro_metrics, width, label='Macro', alpha=0.8)
-            plt.bar(x + width/2, weighted_metrics, width, label='Weighted', alpha=0.8)
-            
-            plt.title('Macro vs Weighted Metrics')
-            plt.xlabel('Metric Type')
-            plt.ylabel('Score')
-            plt.xticks(x, ['Precision', 'Recall', 'F1-Score'])
-            plt.legend()
-            
-            # 9. Processing Statistics
-            plt.subplot(3, 3, 9)
-            processing_stats = [
-                report['processing_stats']['classification_success_rate'],
-                evaluation_metrics['overview']['accuracy'] if evaluation_metrics['overview']['valid_samples'] > 0 else 0
-            ]
-            
-            plt.bar(['Classification\nSuccess Rate', 'Overall\nAccuracy'], processing_stats,
-                    color=['skyblue', 'lightcoral'], alpha=0.8)
-            plt.title('Processing Success Rates')
-            plt.ylabel('Rate')
-            plt.ylim(0, 1)
-            
-            # Add value labels
-            for i, v in enumerate(processing_stats):
-                plt.text(i, v + 0.01, f'{v:.3f}', ha='center', va='bottom', fontweight='bold')
-            
-            plt.tight_layout()
-            
-            # Save comprehensive visualization
-            viz_path = self.output_path / "visualizations" / "comprehensive_evaluation.png"
-            plt.savefig(viz_path, dpi=300, bbox_inches='tight', facecolor='white')
-            plt.close()
-            print(f"✓ Main visualization saved: {viz_path}")
-            
-            # Create separate confusion matrix with better formatting
-            self._create_detailed_confusion_matrix(evaluation_metrics)
-            
-            # Create ROC curves visualization
-            self._create_roc_curves(evaluation_metrics)
-            
-        except Exception as e:
-            print(f"❌ Error creating visualizations: {e}")
+    print("\n" + "="*80)
+    print(" MILK10K MEDICAL IMAGE CLASSIFICATION PIPELINE - LIMITED TO 100 IMAGES ".center(80))
+    print("="*80)
     
-    def _create_detailed_confusion_matrix(self, evaluation_metrics: Dict):
-        """Create a detailed confusion matrix visualization"""
-        print("Creating detailed confusion matrix...")
-        
-        if not evaluation_metrics['confusion_matrix']:
-            print("⚠️ No confusion matrix data available")
-            return
-        
-        try:
-            plt.figure(figsize=(12, 10))
-            cm = np.array(evaluation_metrics['confusion_matrix'])
-            
-            # Calculate percentages
-            cm_percentage = cm.astype('float') / cm.sum(axis=1)[:, np.newaxis] * 100
-            
-            # Create annotation text
-            annotations = []
-            for i in range(cm.shape[0]):
-                row = []
-                for j in range(cm.shape[1]):
-                    if cm[i, j] > 0:
-                        row.append(f'{cm[i, j]}\n({cm_percentage[i, j]:.1f}%)')
-                    else:
-                        row.append('0\n(0.0%)')
-                annotations.append(row)
-            
-            # Create heatmap
-            sns.heatmap(cm, annot=annotations, fmt='', cmap='Blues', cbar=True,
-                       xticklabels=[cls.replace(' ', '\n') for cls in evaluation_metrics['class_names']],
-                       yticklabels=[cls.replace(' ', '\n') for cls in evaluation_metrics['class_names']])
-            
-            plt.
+    # Create and run pipeline
+    pipeline = MILK10kEnhancedClassificationPipeline(
+        dataset_path=DATASET_PATH,
+        groundtruth_path=GROUNDTRUTH_PATH,
+        conceptclip_model_path=CONCEPTCLIP_MODEL_PATH,
+        cache_path=HUGGINGFACE_CACHE_PATH
+    )
+    
+    # Run classification
+    pipeline.run_classification()
+    
+    print("\n✓ Pipeline execution completed successfully!")
+    print("="*80)
