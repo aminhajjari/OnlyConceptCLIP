@@ -6,7 +6,7 @@
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=64G
 #SBATCH --gres=gpu:a100:1
-#SBATCH --mail-user=<aminhjjr@gmail@gmail.com>
+#SBATCH --mail-user=<aminhjjr@gmail.com>
 #SBATCH --time=06:00:00
 #SBATCH --output=/project/def-arashmoh/shahab33/XAI/MILK10k_Training_Input/OnlyResualts/logs/%x-%j.out
 #SBATCH --error=/project/def-arashmoh/shahab33/XAI/MILK10k_Training_Input/OnlyResualts/logs/%x-%j.err
