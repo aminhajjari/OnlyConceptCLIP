@@ -1,4 +1,4 @@
-# MILK10k Medical Image Classification Pipeline - Enhanced Version
+# MILK10k Medical Image Classification Pipeline - Enhanced Version with Debug Prints
 # Classification with comprehensive evaluation metrics
 # Modified to save to specific directory without timestamps
 
@@ -28,13 +28,20 @@ from sklearn.metrics import (
 from sklearn.preprocessing import label_binarize
 warnings.filterwarnings('ignore')
 
+print("✓ All imports loaded successfully")
+
 # Set up Python path for ConceptModel imports
 import sys
 sys.path.insert(0, '/project/def-arashmoh/shahab33/XAI/MILK10k_Training_Input')
 
 # Import local ConceptCLIP modules directly
-from ConceptModel.modeling_conceptclip import ConceptCLIP
-from ConceptModel.preprocessor_conceptclip import ConceptCLIPProcessor
+try:
+    from ConceptModel.modeling_conceptclip import ConceptCLIP
+    from ConceptModel.preprocessor_conceptclip import ConceptCLIPProcessor
+    print("✓ ConceptCLIP modules imported successfully")
+except ImportError as e:
+    print(f"⚠️ ConceptCLIP import error: {e}")
+    print("Will use dummy models for testing")
 
 # ==================== CONFIGURATION ====================
 
@@ -49,14 +56,18 @@ BASE_OUTPUT_PATH = "/project/def-arashmoh/shahab33/XAI/MILK10k_Training_Input/On
 CONCEPTCLIP_MODEL_PATH = "/project/def-arashmoh/shahab33/XAI/MILK10k_Training_Input/ConceptModel"
 HUGGINGFACE_CACHE_PATH = "/project/def-arashmoh/shahab33/XAI/MILK10k_Training_Input/huggingface_cache"
 
+print("✓ Configuration paths set")
+
 # ==================== OUTPUT FOLDER SETUP ====================
 
 def setup_output_folder():
     """Setup the fixed output folder structure"""
+    print("\n=== SETTING UP OUTPUT FOLDERS ===")
     output_path = Path(BASE_OUTPUT_PATH)
     
     # Create main directory if it doesn't exist
     output_path.mkdir(parents=True, exist_ok=True)
+    print(f"✓ Main output directory created: {output_path}")
     
     # Create subdirectories
     subdirs = [
@@ -69,16 +80,16 @@ def setup_output_folder():
     
     for subdir in subdirs:
         (output_path / subdir).mkdir(exist_ok=True)
+        print(f"✓ Subdirectory created: {subdir}")
     
+    print("✓ All output folders setup complete")
     return output_path
 
 # ==================== GPU DETECTION AND SETUP ====================
 
 def setup_gpu_environment():
     """Setup GPU environment with proper error handling"""
-    print("=" * 50)
-    print("GPU ENVIRONMENT SETUP")
-    print("=" * 50)
+    print("\n=== GPU ENVIRONMENT SETUP ===")
     
     # Check CUDA availability
     print(f"PyTorch version: {torch.__version__}")
@@ -99,7 +110,7 @@ def setup_gpu_environment():
         # Test GPU allocation
         try:
             test_tensor = torch.randn(10, 10).to(device)
-            print("✅ GPU allocation test successful")
+            print("✓ GPU allocation test successful")
             del test_tensor
             torch.cuda.empty_cache()
         except Exception as e:
@@ -116,16 +127,14 @@ def setup_gpu_environment():
         print(f"SLURM_GPUS_ON_NODE: {slurm_gpus}")
         print(f"CUDA_VISIBLE_DEVICES: {cuda_visible}")
     
-    print("=" * 50)
+    print("✓ GPU environment setup complete")
     return device
 
 # ==================== CACHE AND OFFLINE SETUP ====================
 
 def setup_offline_environment(cache_path: str):
     """Setup offline environment for Hugging Face models"""
-    print("=" * 50)
-    print("OFFLINE ENVIRONMENT SETUP")
-    print("=" * 50)
+    print("\n=== OFFLINE ENVIRONMENT SETUP ===")
     
     # Set environment variables for offline mode
     os.environ["TRANSFORMERS_OFFLINE"] = "1"
@@ -134,26 +143,29 @@ def setup_offline_environment(cache_path: str):
     os.environ["HF_HOME"] = cache_path
     os.environ["HF_HUB_OFFLINE"] = "1"
     
-    print(f"✅ Offline mode enabled")
-    print(f"✅ Cache directory set to: {cache_path}")
+    print(f"✓ Offline mode enabled")
+    print(f"✓ Cache directory set to: {cache_path}")
     
     # Verify cache directory exists
     cache_path_obj = Path(cache_path)
     if cache_path_obj.exists():
-        print(f"✅ Cache directory exists")
+        print(f"✓ Cache directory exists")
         cached_models = list(cache_path_obj.glob("models--*"))
-        print(f"✅ Found {len(cached_models)} cached models:")
-        for model in cached_models:
+        print(f"✓ Found {len(cached_models)} cached models:")
+        for model in cached_models[:5]:  # Show first 5
             print(f"   - {model.name}")
+        if len(cached_models) > 5:
+            print(f"   ... and {len(cached_models) - 5} more")
     else:
         print(f"❌ Cache directory does not exist: {cache_path}")
         
-    print("=" * 50)
+    print("✓ Offline environment setup complete")
 
 # ==================== LOCAL MODEL LOADING ====================
 
 def load_local_conceptclip_models(model_path: str, cache_path: str, device: str):
     """Load local ConceptCLIP models with offline support"""
+    print("\n=== LOADING CONCEPTCLIP MODELS ===")
     try:
         # Setup offline environment first
         setup_offline_environment(cache_path)
@@ -167,6 +179,7 @@ def load_local_conceptclip_models(model_path: str, cache_path: str, device: str)
             local_files_only=True,
             cache_dir=cache_path
         )
+        print("✓ ConceptCLIP model loaded")
         
         # Try to load processor from ConceptCLIP
         try:
@@ -175,27 +188,32 @@ def load_local_conceptclip_models(model_path: str, cache_path: str, device: str)
                 local_files_only=True,
                 cache_dir=cache_path
             )
+            print("✓ ConceptCLIP processor loaded")
         except Exception as e:
-            print(f"Using simple processor due to error: {e}")
+            print(f"⚠️ Processor loading error: {e}")
+            print("Using simple processor fallback")
             processor = create_simple_processor()
         
         # Move to device
         model = model.to(device)
         model.eval()
         
-        print(f"✅ ConceptCLIP loaded successfully on {device}")
+        print(f"✓ ConceptCLIP loaded successfully on {device}")
         return model, processor
         
     except Exception as e:
         print(f"❌ Error loading local ConceptCLIP: {e}")
-        print("This might be due to missing dependencies. Trying fallback...")
+        print("Creating dummy ConceptCLIP model for testing...")
         return create_dummy_conceptclip_model(device), create_simple_processor()
 
 def create_dummy_conceptclip_model(device: str):
     """Create a dummy ConceptCLIP model for testing"""
+    print("Creating dummy ConceptCLIP model...")
+    
     class DummyConceptCLIP:
         def __init__(self, device):
             self.device = device
+            print(f"✓ Dummy ConceptCLIP initialized on {device}")
             
         def to(self, device):
             self.device = device
@@ -219,6 +237,8 @@ def create_dummy_conceptclip_model(device: str):
 
 def create_simple_processor():
     """Create a simple processor for ConceptCLIP"""
+    print("Creating simple processor...")
+    
     class SimpleProcessor:
         def __call__(self, images=None, text=None, return_tensors="pt", **kwargs):
             import torch
@@ -252,6 +272,7 @@ def create_simple_processor():
             
             return result
     
+    print("✓ Simple processor created")
     return SimpleProcessor()
 
 # ==================== MILK10k DOMAIN CONFIGURATION ====================
@@ -268,52 +289,6 @@ class MedicalDomain:
 
 # CORRECTED MILK10k Medical Domain Configuration
 MILK10K_DOMAIN = MedicalDomain(
-    name="milk10k",
-    image_extensions=['.jpg', '.jpeg', '.png', '.tiff', '.bmp', '.dcm', '.dicom'],
-    text_prompts=[
-        'a dermatoscopic image showing actinic keratosis or intraepidermal carcinoma',
-        'a dermatoscopic image showing basal cell carcinoma',
-        'a dermatoscopic image showing other benign proliferations including collision tumors',
-        'a dermatoscopic image showing benign keratinocytic lesion',
-        'a dermatoscopic image showing dermatofibroma',
-        'a dermatoscopic image showing inflammatory and infectious conditions',
-        'a dermatoscopic image showing other malignant proliferations including collision tumors',
-        'a dermatoscopic image showing melanoma',
-        'a dermatoscopic image showing melanocytic nevus',
-        'a dermatoscopic image showing squamous cell carcinoma or keratoacanthoma',
-        'a dermatoscopic image showing vascular lesions and hemorrhage'
-    ],
-    label_mappings={
-        'AKIEC': 'actinic keratosis or intraepidermal carcinoma',
-        'BCC': 'basal cell carcinoma',
-        'BEN_OTH': 'other benign proliferations including collision tumors',
-        'BKL': 'benign keratinocytic lesion',
-        'DF': 'dermatofibroma',
-        'INF': 'inflammatory and infectious conditions',
-        'MAL_OTH': 'other malignant proliferations including collision tumors',
-        'MEL': 'melanoma',
-        'NV': 'melanocytic nevus',
-        'SCCKA': 'squamous cell carcinoma or keratoacanthoma',
-        'VASC': 'vascular lesions and hemorrhage'
-    },
-    preprocessing_params={'normalize': True, 'enhance_contrast': True},
-    class_names=[
-        'actinic keratosis or intraepidermal carcinoma',
-        'basal cell carcinoma',
-        'other benign proliferations including collision tumors',
-        'benign keratinocytic lesion',
-        'dermatofibroma',
-        'inflammatory and infectious conditions',
-        'other malignant proliferations including collision tumors',
-        'melanoma',
-        'melanocytic nevus',
-        'squamous cell carcinoma or keratoacanthoma',
-        'vascular lesions and hemorrhage'
-    ]
-)
-
-# Alternative version with shorter class names for better visualization
-MILK10K_DOMAIN_SHORT = MedicalDomain(
     name="milk10k",
     image_extensions=['.jpg', '.jpeg', '.png', '.tiff', '.bmp', '.dcm', '.dicom'],
     text_prompts=[
@@ -358,6 +333,8 @@ MILK10K_DOMAIN_SHORT = MedicalDomain(
     ]
 )
 
+print(f"✓ MILK10k domain configured with {len(MILK10K_DOMAIN.class_names)} classes")
+
 # ==================== ENHANCED EVALUATION METRICS ====================
 
 class ComprehensiveEvaluator:
@@ -365,10 +342,14 @@ class ComprehensiveEvaluator:
     
     def __init__(self, class_names: List[str]):
         self.class_names = class_names
+        print(f"✓ Evaluator initialized with {len(class_names)} classes")
         
     def calculate_comprehensive_metrics(self, y_true: List[str], y_pred: List[str], 
                                       y_pred_proba: Optional[List[List[float]]] = None) -> Dict:
         """Calculate all evaluation metrics including ROC-AUC"""
+        print("\n=== CALCULATING COMPREHENSIVE METRICS ===")
+        
+        print(f"Evaluating {len(y_true)} true labels and {len(y_pred)} predictions")
         
         # Convert string labels to indices for sklearn
         label_to_idx = {label: idx for idx, label in enumerate(self.class_names)}
@@ -379,7 +360,10 @@ class ComprehensiveEvaluator:
         valid_indices = [i for i, (true_idx, pred_idx) in enumerate(zip(y_true_idx, y_pred_idx)) 
                         if true_idx != -1 and pred_idx != -1]
         
+        print(f"Valid samples for evaluation: {len(valid_indices)}")
+        
         if not valid_indices:
+            print("❌ No valid samples for evaluation")
             return self._empty_metrics()
         
         y_true_filtered = [y_true_idx[i] for i in valid_indices]
@@ -388,10 +372,13 @@ class ComprehensiveEvaluator:
         # Filter probabilities if provided
         if y_pred_proba:
             y_pred_proba_filtered = [y_pred_proba[i] for i in valid_indices]
+            print(f"✓ Probability data available for ROC-AUC calculation")
         else:
             y_pred_proba_filtered = None
+            print("⚠️ No probability data available - ROC-AUC will be 0")
         
         # Calculate basic metrics
+        print("Calculating basic metrics...")
         accuracy = accuracy_score(y_true_filtered, y_pred_filtered)
         
         # Calculate per-class and weighted metrics
@@ -403,18 +390,24 @@ class ComprehensiveEvaluator:
         recall_weighted = recall_score(y_true_filtered, y_pred_filtered, average='weighted', zero_division=0)
         f1_weighted = f1_score(y_true_filtered, y_pred_filtered, average='weighted', zero_division=0)
         
+        print(f"✓ Basic metrics calculated - Accuracy: {accuracy:.4f}")
+        
         # Per-class metrics
+        print("Calculating per-class metrics...")
         precision_per_class, recall_per_class, f1_per_class, support_per_class = precision_recall_fscore_support(
             y_true_filtered, y_pred_filtered, labels=list(range(len(self.class_names))), zero_division=0
         )
         
         # ROC-AUC Calculation
+        print("Calculating ROC-AUC metrics...")
         roc_auc_metrics = self._calculate_roc_auc(y_true_filtered, y_pred_proba_filtered)
         
         # Confusion matrix
+        print("Creating confusion matrix...")
         cm = confusion_matrix(y_true_filtered, y_pred_filtered, labels=list(range(len(self.class_names))))
         
         # Classification report
+        print("Generating classification report...")
         class_report = classification_report(
             y_true_filtered, y_pred_filtered, 
             target_names=[self.class_names[i] for i in range(len(self.class_names))],
@@ -453,12 +446,14 @@ class ComprehensiveEvaluator:
             'roc_curves': roc_auc_metrics.get('curves', {})
         }
         
+        print("✓ Comprehensive metrics calculation complete")
         return metrics
     
     def _calculate_roc_auc(self, y_true: List[int], y_pred_proba: Optional[List[List[float]]]) -> Dict:
         """Calculate ROC-AUC metrics for multi-class classification"""
         
         if y_pred_proba is None or len(y_pred_proba) == 0:
+            print("⚠️ No probability data - returning zero ROC-AUC scores")
             return {
                 'ovr_macro': 0.0,
                 'ovr_weighted': 0.0,
@@ -469,6 +464,7 @@ class ComprehensiveEvaluator:
             }
         
         try:
+            print("Calculating ROC-AUC scores...")
             # Convert to numpy arrays
             y_true_array = np.array(y_true)
             y_pred_proba_array = np.array(y_pred_proba)
@@ -487,6 +483,8 @@ class ComprehensiveEvaluator:
                                              average='macro', multi_class='ovo')
             roc_auc_ovo_weighted = roc_auc_score(y_true_array, y_pred_proba_array, 
                                                 average='weighted', multi_class='ovo')
+            
+            print(f"✓ ROC-AUC OvR Macro: {roc_auc_ovr_macro:.4f}")
             
             # Calculate per-class ROC-AUC and curves
             per_class_auc = []
@@ -511,6 +509,8 @@ class ComprehensiveEvaluator:
                 else:
                     per_class_auc.append(0.0)
             
+            print("✓ Per-class ROC-AUC calculated")
+            
             return {
                 'ovr_macro': float(roc_auc_ovr_macro),
                 'ovr_weighted': float(roc_auc_ovr_weighted),
@@ -521,7 +521,7 @@ class ComprehensiveEvaluator:
             }
             
         except Exception as e:
-            print(f"Warning: Error calculating ROC-AUC: {e}")
+            print(f"❌ Error calculating ROC-AUC: {e}")
             return {
                 'ovr_macro': 0.0,
                 'ovr_weighted': 0.0,
@@ -563,19 +563,24 @@ class MILK10kEnhancedClassificationPipeline:
     
     def __init__(self, dataset_path: str, groundtruth_path: str, 
                  conceptclip_model_path: str = None, cache_path: str = None):
+        print("\n=== INITIALIZING MILK10K PIPELINE ===")
+        
         self.dataset_path = Path(dataset_path)
         self.groundtruth_path = groundtruth_path
         self.conceptclip_model_path = conceptclip_model_path or CONCEPTCLIP_MODEL_PATH
         self.cache_path = cache_path or HUGGINGFACE_CACHE_PATH
         self.domain = MILK10K_DOMAIN
         
+        print(f"Dataset path: {self.dataset_path}")
+        print(f"Ground truth path: {self.groundtruth_path}")
+        
         # Setup fixed output folder (no timestamps)
         self.output_path = setup_output_folder()
-        print(f"📁 Output folder: {self.output_path}")
+        print(f"Output folder: {self.output_path}")
         
         # Initialize device with proper setup
         self.device = setup_gpu_environment()
-        print(f"Initializing MILK10k enhanced classification pipeline on {self.device}")
+        print(f"Device: {self.device}")
         
         # Initialize evaluator
         self.evaluator = ComprehensiveEvaluator(self.domain.class_names)
@@ -586,20 +591,39 @@ class MILK10kEnhancedClassificationPipeline:
         # Load ground truth
         self._load_ground_truth()
         
+        print("✓ MILK10k pipeline initialization complete")
+        
     def _load_models(self):
         """Load local ConceptCLIP model"""
+        print("\n=== LOADING MODELS ===")
         self.conceptclip_model, self.conceptclip_processor = load_local_conceptclip_models(
             self.conceptclip_model_path, self.cache_path, self.device
         )
+        print("✓ Models loaded successfully")
         
     def _load_ground_truth(self):
         """Load ground truth annotations"""
+        print("\n=== LOADING GROUND TRUTH ===")
+        
         if os.path.exists(self.groundtruth_path):
-            self.ground_truth = pd.read_csv(self.groundtruth_path)
-            print(f"Loaded ground truth: {len(self.ground_truth)} samples")
-            print(f"Ground truth columns: {list(self.ground_truth.columns)}")
+            try:
+                self.ground_truth = pd.read_csv(self.groundtruth_path)
+                print(f"✓ Ground truth loaded: {len(self.ground_truth)} samples")
+                print(f"Columns: {list(self.ground_truth.columns)}")
+                
+                # Check for expected MILK10k columns
+                expected_cols = ['AKIEC', 'BCC', 'BEN_OTH', 'BKL', 'DF', 'INF', 'MAL_OTH', 'MEL', 'NV', 'SCCKA', 'VASC']
+                found_cols = [col for col in expected_cols if col in self.ground_truth.columns]
+                print(f"Expected diagnostic columns found: {found_cols}")
+                
+                if not found_cols:
+                    print("⚠️ No expected diagnostic columns found. Will try alternative column names.")
+                
+            except Exception as e:
+                print(f"❌ Error loading ground truth: {e}")
+                self.ground_truth = None
         else:
-            print(f"Ground truth file not found: {self.groundtruth_path}")
+            print(f"❌ Ground truth file not found: {self.groundtruth_path}")
             self.ground_truth = None
     
     def preprocess_image(self, image_path: str) -> Optional[np.ndarray]:
@@ -616,11 +640,12 @@ class MILK10kEnhancedClassificationPipeline:
                 return self._load_standard_image(image_path)
                 
         except Exception as e:
-            print(f"Error loading {image_path}: {e}")
+            print(f"❌ Error loading {image_path}: {e}")
             return None
     
     def _load_dicom(self, image_path: Path) -> np.ndarray:
         """Load DICOM images"""
+        print(f"Loading DICOM: {image_path.name}")
         ds = pydicom.dcmread(image_path)
         image = ds.pixel_array.astype(np.float32)
         
@@ -635,6 +660,7 @@ class MILK10kEnhancedClassificationPipeline:
     
     def _load_nifti(self, image_path: Path) -> np.ndarray:
         """Load NIfTI images"""
+        print(f"Loading NIfTI: {image_path.name}")
         nii_img = nib.load(image_path)
         image = nii_img.get_fdata()
         
@@ -720,7 +746,7 @@ class MILK10kEnhancedClassificationPipeline:
             return probabilities
             
         except Exception as e:
-            print(f"Classification error: {e}")
+            print(f"❌ Classification error: {e}")
             return {}
     
     def get_ground_truth_label(self, img_path: Path) -> Optional[str]:
@@ -730,34 +756,64 @@ class MILK10kEnhancedClassificationPipeline:
         
         img_name = img_path.stem
         
-        # Try to find matching row in ground truth
-        matching_rows = self.ground_truth[
-            self.ground_truth.iloc[:, 0].astype(str).str.contains(img_name, na=False)
-        ]
+        # Try different matching strategies for MILK10k dataset
+        matching_rows = None
         
-        if len(matching_rows) > 0:
+        # Strategy 1: Direct match with lesion_id or image column
+        if 'lesion_id' in self.ground_truth.columns:
+            matching_rows = self.ground_truth[
+                self.ground_truth['lesion_id'].astype(str) == img_name
+            ]
+        elif 'image' in self.ground_truth.columns:
+            matching_rows = self.ground_truth[
+                self.ground_truth['image'].astype(str) == img_name
+            ]
+        
+        # Strategy 2: Partial match if direct match fails
+        if matching_rows is None or len(matching_rows) == 0:
+            for col in self.ground_truth.columns:
+                if col.lower() in ['lesion_id', 'image', 'filename', 'id']:
+                    matching_rows = self.ground_truth[
+                        self.ground_truth[col].astype(str).str.contains(img_name, na=False)
+                    ]
+                    if len(matching_rows) > 0:
+                        break
+        
+        if matching_rows is not None and len(matching_rows) > 0:
             row = matching_rows.iloc[0]
-            # Look for the label in subsequent columns
-            for col in self.ground_truth.columns[1:]:
-                if col in self.domain.label_mappings and row[col] == 1:
+            
+            # Check for one-hot encoded columns (AKIEC, BCC, etc.)
+            for col in ['AKIEC', 'BCC', 'BEN_OTH', 'BKL', 'DF', 'INF', 'MAL_OTH', 'MEL', 'NV', 'SCCKA', 'VASC']:
+                if col in row and row[col] == 1:
                     return self.domain.label_mappings[col]
             
-            # If no specific column, check if there's a direct label column
-            if 'label' in row:
-                return str(row['label'])
+            # Check for direct diagnosis column
+            for col in ['diagnosis', 'label', 'dx']:
+                if col in row:
+                    diagnosis = str(row[col]).upper()
+                    if diagnosis in self.domain.label_mappings:
+                        return self.domain.label_mappings[diagnosis]
         
         return None
     
     def process_dataset(self) -> Dict:
         """Process entire MILK10k dataset with comprehensive evaluation"""
-        print("Starting MILK10k dataset classification with comprehensive evaluation...")
+        print("\n=== STARTING DATASET PROCESSING ===")
         
         # Find all images
+        print("Searching for images in dataset...")
         image_files = []
         for ext in self.domain.image_extensions:
-            image_files.extend(self.dataset_path.rglob(f"*{ext}"))
+            found_files = list(self.dataset_path.rglob(f"*{ext}"))
+            if found_files:
+                print(f"✓ Found {len(found_files)} {ext} files")
+                image_files.extend(found_files)
         
-        print(f"Found {len(image_files)} images in dataset")
+        print(f"✓ Total images found: {len(image_files)}")
+        
+        if not image_files:
+            print("❌ No images found in dataset!")
+            return {}
         
         results = []
         format_counter = Counter()
@@ -767,7 +823,14 @@ class MILK10kEnhancedClassificationPipeline:
         y_pred = []
         y_pred_proba = []
         
-        for img_path in tqdm(image_files, desc="Classifying MILK10k images"):
+        # Processing counters
+        successful_loads = 0
+        successful_classifications = 0
+        ground_truth_matches = 0
+        
+        print(f"\n=== PROCESSING {len(image_files)} IMAGES ===")
+        
+        for i, img_path in enumerate(tqdm(image_files, desc="Classifying MILK10k images")):
             try:
                 # Track file formats
                 ext = img_path.suffix.lower()
@@ -776,7 +839,10 @@ class MILK10kEnhancedClassificationPipeline:
                 # Load and preprocess image
                 image = self.preprocess_image(img_path)
                 if image is None:
+                    print(f"⚠️ Failed to load image: {img_path.name}")
                     continue
+                
+                successful_loads += 1
                 
                 # Save processed image for reference
                 img_name = img_path.stem
@@ -786,8 +852,13 @@ class MILK10kEnhancedClassificationPipeline:
                 # Classify image
                 classification_probs = self.classify_image(image)
                 
+                if classification_probs:
+                    successful_classifications += 1
+                
                 # Get ground truth
                 ground_truth = self.get_ground_truth_label(img_path)
+                if ground_truth:
+                    ground_truth_matches += 1
                 
                 # Get prediction
                 if classification_probs:
@@ -821,28 +892,43 @@ class MILK10kEnhancedClassificationPipeline:
                 
                 results.append(result)
                 
-                # Progress indicator
-                status = "✓" if result['correct'] else ("✗" if ground_truth else "-")
-                print(f"{status} {img_name}: {predicted_disease} ({prediction_confidence:.2%}) [Device: {self.device}]")
+                # Progress indicator every 50 images
+                if (i + 1) % 50 == 0:
+                    print(f"\nProgress update after {i + 1} images:")
+                    print(f"  ✓ Successfully loaded: {successful_loads}")
+                    print(f"  ✓ Successfully classified: {successful_classifications}")
+                    print(f"  ✓ Ground truth matches: {ground_truth_matches}")
                 
             except Exception as e:
-                print(f"Error processing {img_path}: {e}")
+                print(f"❌ Error processing {img_path}: {e}")
                 continue
         
+        print("\n=== PROCESSING COMPLETE ===")
+        print(f"✓ Images processed: {len(results)}")
+        print(f"✓ Successful loads: {successful_loads}")
+        print(f"✓ Successful classifications: {successful_classifications}")
+        print(f"✓ Ground truth matches: {ground_truth_matches}")
+        print(f"✓ Valid evaluation samples: {len(y_true)}")
+        
         # Calculate comprehensive metrics
+        print("\n=== CALCULATING EVALUATION METRICS ===")
         evaluation_metrics = self.evaluator.calculate_comprehensive_metrics(y_true, y_pred, y_pred_proba)
         
         # Generate comprehensive report
+        print("\n=== GENERATING COMPREHENSIVE REPORT ===")
         report = self._generate_comprehensive_report(results, format_counter, evaluation_metrics)
         
         # Save all results and metrics
+        print("\n=== SAVING RESULTS ===")
         self._save_comprehensive_results(results, report, evaluation_metrics)
         
+        print("✓ Dataset processing complete!")
         return report
     
     def _generate_comprehensive_report(self, results: List[Dict], format_counter: Counter, 
                                      evaluation_metrics: Dict) -> Dict:
         """Generate comprehensive processing report with all metrics including ROC-AUC"""
+        print("Generating comprehensive report...")
         
         # Basic statistics
         total_processed = len(results)
@@ -874,7 +960,7 @@ class MILK10kEnhancedClassificationPipeline:
                 'dataset_path': str(self.dataset_path),
                 'output_path': str(self.output_path),
                 'model_type': 'ConceptCLIP',
-                'pipeline_version': 'Enhanced_v2.0_Fixed_Output_with_ROC'
+                'pipeline_version': 'Enhanced_v2.0_Fixed_Output_with_ROC_Debug'
             },
             'system_info': {
                 'device_used': device_used,
@@ -924,25 +1010,30 @@ class MILK10kEnhancedClassificationPipeline:
             }
         }
         
+        print("✓ Comprehensive report generated")
         return report
     
     def _save_comprehensive_results(self, results: List[Dict], report: Dict, evaluation_metrics: Dict):
         """Save comprehensive results, reports, and visualizations"""
+        print("Saving comprehensive results...")
         
         # Save detailed results
         results_df = pd.DataFrame(results)
         results_path = self.output_path / "reports" / "classification_results.csv"
         results_df.to_csv(results_path, index=False)
+        print(f"✓ Results saved: {results_path}")
         
         # Save comprehensive report
         report_path = self.output_path / "reports" / "comprehensive_report.json"
         with open(report_path, 'w') as f:
             json.dump(report, f, indent=2, default=str)
+        print(f"✓ Report saved: {report_path}")
         
         # Save evaluation metrics separately
         metrics_path = self.output_path / "evaluation_metrics" / "detailed_metrics.json"
         with open(metrics_path, 'w') as f:
             json.dump(evaluation_metrics, f, indent=2, default=str)
+        print(f"✓ Metrics saved: {metrics_path}")
         
         # Save paper-ready metrics summary
         paper_metrics = {
@@ -964,27 +1055,22 @@ class MILK10kEnhancedClassificationPipeline:
         paper_metrics_df = pd.DataFrame([paper_metrics])
         paper_metrics_path = self.output_path / "evaluation_metrics" / "paper_comparison_metrics.csv"
         paper_metrics_df.to_csv(paper_metrics_path, index=False)
+        print(f"✓ Paper metrics saved: {paper_metrics_path}")
         
         # Generate comprehensive visualizations
+        print("Creating visualizations...")
         self._create_comprehensive_visualizations(results_df, evaluation_metrics, report)
         
         # Create classification report text file
         self._save_classification_report_text(evaluation_metrics)
         
-        print(f"\n📊 RESULTS SAVED TO FIXED LOCATION:")
-        print(f"   📁 Output folder: {self.output_path}")
-        print(f"   🖼️  Processed images: {self.output_path / 'processed_images'}")
-        print(f"   📋 Detailed results: {results_path}")
-        print(f"   📊 Comprehensive report: {report_path}")
-        print(f"   📈 Evaluation metrics: {metrics_path}")
-        print(f"   📄 Paper metrics: {paper_metrics_path}")
-        print(f"   📊 Visualizations: {self.output_path / 'visualizations'}")
+        print("✓ All results saved successfully")
     
     def _save_classification_report_text(self, evaluation_metrics: Dict):
         """Save sklearn classification report as text file with ROC-AUC"""
+        print("Saving classification report text...")
+        
         if 'classification_report' in evaluation_metrics:
-            from sklearn.metrics import classification_report
-            
             # Convert back to string format
             report_text = "MILK10k ConceptCLIP Classification Report\n"
             report_text += "=" * 50 + "\n\n"
@@ -1019,319 +1105,144 @@ class MILK10kEnhancedClassificationPipeline:
             report_text_path = self.output_path / "evaluation_metrics" / "classification_report.txt"
             with open(report_text_path, 'w') as f:
                 f.write(report_text)
+                
+            print(f"✓ Classification report text saved: {report_text_path}")
     
     def _create_comprehensive_visualizations(self, results_df: pd.DataFrame, 
                                            evaluation_metrics: Dict, report: Dict):
         """Create comprehensive visualization plots"""
+        print("Creating comprehensive visualizations...")
         
-        # Create multiple visualization plots
-        fig = plt.figure(figsize=(20, 16))
-        
-        # 1. Confusion Matrix
-        plt.subplot(3, 3, 1)
-        if evaluation_metrics['confusion_matrix']:
-            cm = np.array(evaluation_metrics['confusion_matrix'])
-            sns.heatmap(cm, annot=True, fmt='d', cmap='Blues',
-                       xticklabels=evaluation_metrics['class_names'],
-                       yticklabels=evaluation_metrics['class_names'])
-            plt.title('Confusion Matrix')
-            plt.ylabel('True Label')
-            plt.xlabel('Predicted Label')
+        try:
+            # Create multiple visualization plots
+            fig = plt.figure(figsize=(20, 16))
+            
+            # 1. Confusion Matrix
+            plt.title('Detailed Confusion Matrix\n(Count and Percentage)', fontsize=14, fontweight='bold')
+            plt.ylabel('True Label', fontsize=12)
+            plt.xlabel('Predicted Label', fontsize=12)
             plt.xticks(rotation=45)
             plt.yticks(rotation=0)
-        
-        # 2. Per-Class Metrics
-        plt.subplot(3, 3, 2)
-        classes = list(evaluation_metrics['per_class_metrics'].keys())
-        precisions = [evaluation_metrics['per_class_metrics'][cls]['precision'] for cls in classes]
-        recalls = [evaluation_metrics['per_class_metrics'][cls]['recall'] for cls in classes]
-        f1s = [evaluation_metrics['per_class_metrics'][cls]['f1_score'] for cls in classes]
-        
-        x = np.arange(len(classes))
-        width = 0.25
-        
-        plt.bar(x - width, precisions, width, label='Precision', alpha=0.8)
-        plt.bar(x, recalls, width, label='Recall', alpha=0.8)
-        plt.bar(x + width, f1s, width, label='F1-Score', alpha=0.8)
-        
-        plt.title('Per-Class Metrics')
-        plt.xlabel('Classes')
-        plt.ylabel('Score')
-        plt.xticks(x, [cls.replace(' ', '\n') for cls in classes], rotation=45)
-        plt.legend()
-        
-        # 3. Prediction Distribution
-        plt.subplot(3, 3, 3)
-        pred_counts = report['predictions']['distribution']
-        plt.bar(pred_counts.keys(), pred_counts.values())
-        plt.title('Prediction Distribution')
-        plt.xlabel('Predicted Class')
-        plt.ylabel('Count')
-        plt.xticks(rotation=45)
-        
-        # 4. Confidence Distribution
-        plt.subplot(3, 3, 4)
-        plt.hist(results_df['prediction_confidence'], bins=30, alpha=0.7, color='green')
-        plt.title('Prediction Confidence Distribution')
-        plt.xlabel('Confidence')
-        plt.ylabel('Frequency')
-        
-        # 5. Accuracy by Confidence Level
-        plt.subplot(3, 3, 5)
-        if 'ground_truth' in results_df.columns:
-            results_with_gt = results_df.dropna(subset=['ground_truth'])
-            if len(results_with_gt) > 0:
-                conf_bins = np.linspace(0, 1, 11)
-                accuracies = []
-                counts = []
-                for i in range(len(conf_bins)-1):
-                    mask = ((results_with_gt['prediction_confidence'] >= conf_bins[i]) & 
-                           (results_with_gt['prediction_confidence'] < conf_bins[i+1]))
-                    if mask.sum() > 0:
-                        acc = results_with_gt[mask]['correct'].mean()
-                        accuracies.append(acc)
-                        counts.append(mask.sum())
-                    else:
-                        accuracies.append(0)
-                        counts.append(0)
-                
-                plt.plot(conf_bins[:-1], accuracies, marker='o', linewidth=2)
-                plt.title('Accuracy vs Prediction Confidence')
-                plt.xlabel('Prediction Confidence')
-                plt.ylabel('Accuracy')
-                plt.grid(True, alpha=0.3)
-        
-        # 6. Support per Class
-        plt.subplot(3, 3, 6)
-        supports = [evaluation_metrics['per_class_metrics'][cls]['support'] for cls in classes]
-        plt.bar(classes, supports, alpha=0.7, color='orange')
-        plt.title('Support per Class')
-        plt.xlabel('Classes')
-        plt.ylabel('Number of Samples')
-        plt.xticks(rotation=45)
-        
-        # 7. Overall Metrics Comparison
-        plt.subplot(3, 3, 7)
-        metrics_names = ['Accuracy', 'Precision', 'Recall', 'F1-Score']
-        metrics_values = [
-            evaluation_metrics['overview']['accuracy'],
-            evaluation_metrics['overview']['precision_macro'],
-            evaluation_metrics['overview']['recall_macro'],
-            evaluation_metrics['overview']['f1_macro']
-        ]
-        
-        colors = ['red', 'blue', 'green', 'purple']
-        bars = plt.bar(metrics_names, metrics_values, color=colors, alpha=0.7)
-        plt.title('Overall Performance Metrics')
-        plt.ylabel('Score')
-        plt.ylim(0, 1)
-        
-        # Add value labels on bars
-        for bar, value in zip(bars, metrics_values):
-            plt.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.01,
-                    f'{value:.3f}', ha='center', va='bottom', fontweight='bold')
-        
-        # 8. Macro vs Weighted Metrics
-        plt.subplot(3, 3, 8)
-        macro_metrics = [
-            evaluation_metrics['overview']['precision_macro'],
-            evaluation_metrics['overview']['recall_macro'],
-            evaluation_metrics['overview']['f1_macro']
-        ]
-        weighted_metrics = [
-            evaluation_metrics['overview']['precision_weighted'],
-            evaluation_metrics['overview']['recall_weighted'],
-            evaluation_metrics['overview']['f1_weighted']
-        ]
-        
-        x = np.arange(3)
-        width = 0.35
-        
-        plt.bar(x - width/2, macro_metrics, width, label='Macro', alpha=0.8)
-        plt.bar(x + width/2, weighted_metrics, width, label='Weighted', alpha=0.8)
-        
-        plt.title('Macro vs Weighted Metrics')
-        plt.xlabel('Metric Type')
-        plt.ylabel('Score')
-        plt.xticks(x, ['Precision', 'Recall', 'F1-Score'])
-        plt.legend()
-        
-        # 9. Processing Statistics
-        plt.subplot(3, 3, 9)
-        processing_stats = [
-            report['processing_stats']['classification_success_rate'],
-            evaluation_metrics['overview']['accuracy'] if evaluation_metrics['overview']['valid_samples'] > 0 else 0
-        ]
-        
-        plt.bar(['Classification\nSuccess Rate', 'Overall\nAccuracy'], processing_stats,
-                color=['skyblue', 'lightcoral'], alpha=0.8)
-        plt.title('Processing Success Rates')
-        plt.ylabel('Rate')
-        plt.ylim(0, 1)
-        
-        # Add value labels
-        for i, v in enumerate(processing_stats):
-            plt.text(i, v + 0.01, f'{v:.3f}', ha='center', va='bottom', fontweight='bold')
-        
-        plt.tight_layout()
-        
-        # Save comprehensive visualization
-        viz_path = self.output_path / "visualizations" / "comprehensive_evaluation.png"
-        plt.savefig(viz_path, dpi=300, bbox_inches='tight', facecolor='white')
-        plt.close()
-        
-        # Create separate confusion matrix with better formatting
-        self._create_detailed_confusion_matrix(evaluation_metrics)
-        
-        # Create ROC curves visualization
-        self._create_roc_curves(evaluation_metrics)
-        
-        print(f"📈 Comprehensive visualizations saved to: {viz_path}")
-    
-    def _create_detailed_confusion_matrix(self, evaluation_metrics: Dict):
-        """Create a detailed confusion matrix visualization"""
-        if not evaluation_metrics['confusion_matrix']:
-            return
-        
-        plt.figure(figsize=(12, 10))
-        cm = np.array(evaluation_metrics['confusion_matrix'])
-        
-        # Calculate percentages
-        cm_percentage = cm.astype('float') / cm.sum(axis=1)[:, np.newaxis] * 100
-        
-        # Create annotation text
-        annotations = []
-        for i in range(cm.shape[0]):
-            row = []
-            for j in range(cm.shape[1]):
-                if cm[i, j] > 0:
-                    row.append(f'{cm[i, j]}\n({cm_percentage[i, j]:.1f}%)')
-                else:
-                    row.append('0\n(0.0%)')
-            annotations.append(row)
-        
-        # Create heatmap
-        sns.heatmap(cm, annot=annotations, fmt='', cmap='Blues', cbar=True,
-                   xticklabels=[cls.replace(' ', '\n') for cls in evaluation_metrics['class_names']],
-                   yticklabels=[cls.replace(' ', '\n') for cls in evaluation_metrics['class_names']])
-        
-        plt.title('Detailed Confusion Matrix\n(Count and Percentage)', fontsize=14, fontweight='bold')
-        plt.ylabel('True Label', fontsize=12)
-        plt.xlabel('Predicted Label', fontsize=12)
-        plt.xticks(rotation=45)
-        plt.yticks(rotation=0)
-        
-        # Save detailed confusion matrix
-        cm_path = self.output_path / "visualizations" / "detailed_confusion_matrix.png"
-        plt.savefig(cm_path, dpi=300, bbox_inches='tight', facecolor='white')
-        plt.close()
+            
+            # Save detailed confusion matrix
+            cm_path = self.output_path / "visualizations" / "detailed_confusion_matrix.png"
+            plt.savefig(cm_path, dpi=300, bbox_inches='tight', facecolor='white')
+            plt.close()
+            print(f"✓ Detailed confusion matrix saved: {cm_path}")
+            
+        except Exception as e:
+            print(f"❌ Error creating detailed confusion matrix: {e}")
     
     def _create_roc_curves(self, evaluation_metrics: Dict):
         """Create ROC curve visualizations for multi-class classification"""
+        print("Creating ROC curves...")
+        
         if 'roc_curves' not in evaluation_metrics or not evaluation_metrics['roc_curves']:
-            print("No ROC curve data available for visualization")
+            print("⚠️ No ROC curve data available for visualization")
             return
         
-        curves_data = evaluation_metrics['roc_curves']
-        n_classes = len(self.class_names)
-        
-        # Create figure with subplots
-        fig, axes = plt.subplots(2, 2, figsize=(15, 12))
-        
-        # 1. All classes ROC curves in one plot
-        ax1 = axes[0, 0]
-        for class_name, curve_data in curves_data.items():
-            ax1.plot(curve_data['fpr'], curve_data['tpr'], 
-                    label=f"{class_name} (AUC = {curve_data['auc']:.3f})", 
-                    linewidth=2)
-        
-        ax1.plot([0, 1], [0, 1], 'k--', linewidth=1, label='Random Classifier')
-        ax1.set_xlabel('False Positive Rate', fontsize=10)
-        ax1.set_ylabel('True Positive Rate', fontsize=10)
-        ax1.set_title('ROC Curves - All Classes', fontsize=12, fontweight='bold')
-        ax1.legend(loc='lower right', fontsize=8)
-        ax1.grid(True, alpha=0.3)
-        
-        # 2. Macro-Average ROC
-        ax2 = axes[0, 1]
-        # Calculate macro-average ROC curve (simplified visualization)
-        mean_fpr = np.linspace(0, 1, 100)
-        mean_tpr = np.zeros_like(mean_fpr)
-        
-        for class_name, curve_data in curves_data.items():
-            # Interpolate TPR at common FPR points
-            tpr_interp = np.interp(mean_fpr, curve_data['fpr'], curve_data['tpr'])
-            mean_tpr += tpr_interp
-        
-        mean_tpr /= len(curves_data)
-        macro_auc = evaluation_metrics['overview']['roc_auc_ovr_macro']
-        
-        ax2.plot(mean_fpr, mean_tpr, color='b', linewidth=3,
-                label=f'Macro-Average (AUC = {macro_auc:.3f})')
-        ax2.plot([0, 1], [0, 1], 'k--', linewidth=1, label='Random Classifier')
-        ax2.fill_between(mean_fpr, 0, mean_tpr, alpha=0.2, color='b')
-        ax2.set_xlabel('False Positive Rate', fontsize=10)
-        ax2.set_ylabel('True Positive Rate', fontsize=10)
-        ax2.set_title('Macro-Average ROC Curve', fontsize=12, fontweight='bold')
-        ax2.legend(loc='lower right', fontsize=10)
-        ax2.grid(True, alpha=0.3)
-        
-        # 3. Per-Class AUC Bar Chart
-        ax3 = axes[1, 0]
-        class_names_short = [cls.replace(' ', '\n') for cls in self.class_names]
-        per_class_aucs = [evaluation_metrics['per_class_metrics'][cls]['roc_auc'] 
-                         for cls in self.class_names]
-        
-        bars = ax3.bar(class_names_short, per_class_aucs, color='skyblue', alpha=0.8)
-        ax3.set_xlabel('Classes', fontsize=10)
-        ax3.set_ylabel('AUC Score', fontsize=10)
-        ax3.set_title('Per-Class ROC-AUC Scores', fontsize=12, fontweight='bold')
-        ax3.set_ylim([0, 1])
-        ax3.axhline(y=0.5, color='r', linestyle='--', alpha=0.5, label='Random (0.5)')
-        ax3.legend()
-        
-        # Add value labels on bars
-        for bar, auc in zip(bars, per_class_aucs):
-            height = bar.get_height()
-            ax3.text(bar.get_x() + bar.get_width()/2., height + 0.01,
-                    f'{auc:.3f}', ha='center', va='bottom', fontsize=8)
-        
-        ax3.tick_params(axis='x', rotation=45)
-        
-        # 4. ROC-AUC Comparison (Different averaging methods)
-        ax4 = axes[1, 1]
-        metrics_names = ['OvR\nMacro', 'OvR\nWeighted', 'OvO\nMacro', 'OvO\nWeighted']
-        metrics_values = [
-            evaluation_metrics['overview']['roc_auc_ovr_macro'],
-            evaluation_metrics['overview']['roc_auc_ovr_weighted'],
-            evaluation_metrics['overview']['roc_auc_ovo_macro'],
-            evaluation_metrics['overview']['roc_auc_ovo_weighted']
-        ]
-        
-        colors = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4']
-        bars = ax4.bar(metrics_names, metrics_values, color=colors, alpha=0.8)
-        ax4.set_xlabel('ROC-AUC Method', fontsize=10)
-        ax4.set_ylabel('AUC Score', fontsize=10)
-        ax4.set_title('ROC-AUC Scores by Method', fontsize=12, fontweight='bold')
-        ax4.set_ylim([0, 1])
-        ax4.axhline(y=0.5, color='r', linestyle='--', alpha=0.5, label='Random (0.5)')
-        ax4.legend()
-        
-        # Add value labels on bars
-        for bar, value in zip(bars, metrics_values):
-            ax4.text(bar.get_x() + bar.get_width()/2., bar.get_height() + 0.01,
-                    f'{value:.3f}', ha='center', va='bottom', fontweight='bold')
-        
-        plt.suptitle('ROC Analysis - MILK10k ConceptCLIP Classification', 
-                    fontsize=14, fontweight='bold', y=1.02)
-        plt.tight_layout()
-        
-        # Save ROC curves visualization
-        roc_path = self.output_path / "visualizations" / "roc_curves_analysis.png"
-        plt.savefig(roc_path, dpi=300, bbox_inches='tight', facecolor='white')
-        plt.close()
-        
-        print(f"📊 ROC curves saved to: {roc_path}")
+        try:
+            curves_data = evaluation_metrics['roc_curves']
+            
+            # Create figure with subplots
+            fig, axes = plt.subplots(2, 2, figsize=(15, 12))
+            
+            # 1. All classes ROC curves in one plot
+            ax1 = axes[0, 0]
+            for class_name, curve_data in curves_data.items():
+                ax1.plot(curve_data['fpr'], curve_data['tpr'], 
+                        label=f"{class_name} (AUC = {curve_data['auc']:.3f})", 
+                        linewidth=2)
+            
+            ax1.plot([0, 1], [0, 1], 'k--', linewidth=1, label='Random Classifier')
+            ax1.set_xlabel('False Positive Rate', fontsize=10)
+            ax1.set_ylabel('True Positive Rate', fontsize=10)
+            ax1.set_title('ROC Curves - All Classes', fontsize=12, fontweight='bold')
+            ax1.legend(loc='lower right', fontsize=8)
+            ax1.grid(True, alpha=0.3)
+            
+            # 2. Macro-Average ROC
+            ax2 = axes[0, 1]
+            # Calculate macro-average ROC curve (simplified visualization)
+            mean_fpr = np.linspace(0, 1, 100)
+            mean_tpr = np.zeros_like(mean_fpr)
+            
+            for class_name, curve_data in curves_data.items():
+                # Interpolate TPR at common FPR points
+                tpr_interp = np.interp(mean_fpr, curve_data['fpr'], curve_data['tpr'])
+                mean_tpr += tpr_interp
+            
+            mean_tpr /= len(curves_data)
+            macro_auc = evaluation_metrics['overview']['roc_auc_ovr_macro']
+            
+            ax2.plot(mean_fpr, mean_tpr, color='b', linewidth=3,
+                    label=f'Macro-Average (AUC = {macro_auc:.3f})')
+            ax2.plot([0, 1], [0, 1], 'k--', linewidth=1, label='Random Classifier')
+            ax2.fill_between(mean_fpr, 0, mean_tpr, alpha=0.2, color='b')
+            ax2.set_xlabel('False Positive Rate', fontsize=10)
+            ax2.set_ylabel('True Positive Rate', fontsize=10)
+            ax2.set_title('Macro-Average ROC Curve', fontsize=12, fontweight='bold')
+            ax2.legend(loc='lower right', fontsize=10)
+            ax2.grid(True, alpha=0.3)
+            
+            # 3. Per-Class AUC Bar Chart
+            ax3 = axes[1, 0]
+            class_names_short = [cls.replace(' ', '\n') for cls in self.domain.class_names]
+            per_class_aucs = [evaluation_metrics['per_class_metrics'][cls]['roc_auc'] 
+                             for cls in self.domain.class_names]
+            
+            bars = ax3.bar(class_names_short, per_class_aucs, color='skyblue', alpha=0.8)
+            ax3.set_xlabel('Classes', fontsize=10)
+            ax3.set_ylabel('AUC Score', fontsize=10)
+            ax3.set_title('Per-Class ROC-AUC Scores', fontsize=12, fontweight='bold')
+            ax3.set_ylim([0, 1])
+            ax3.axhline(y=0.5, color='r', linestyle='--', alpha=0.5, label='Random (0.5)')
+            ax3.legend()
+            
+            # Add value labels on bars
+            for bar, auc in zip(bars, per_class_aucs):
+                height = bar.get_height()
+                ax3.text(bar.get_x() + bar.get_width()/2., height + 0.01,
+                        f'{auc:.3f}', ha='center', va='bottom', fontsize=8)
+            
+            ax3.tick_params(axis='x', rotation=45)
+            
+            # 4. ROC-AUC Comparison (Different averaging methods)
+            ax4 = axes[1, 1]
+            metrics_names = ['OvR\nMacro', 'OvR\nWeighted', 'OvO\nMacro', 'OvO\nWeighted']
+            metrics_values = [
+                evaluation_metrics['overview']['roc_auc_ovr_macro'],
+                evaluation_metrics['overview']['roc_auc_ovr_weighted'],
+                evaluation_metrics['overview']['roc_auc_ovo_macro'],
+                evaluation_metrics['overview']['roc_auc_ovo_weighted']
+            ]
+            
+            colors = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4']
+            bars = ax4.bar(metrics_names, metrics_values, color=colors, alpha=0.8)
+            ax4.set_xlabel('ROC-AUC Method', fontsize=10)
+            ax4.set_ylabel('AUC Score', fontsize=10)
+            ax4.set_title('ROC-AUC Scores by Method', fontsize=12, fontweight='bold')
+            ax4.set_ylim([0, 1])
+            ax4.axhline(y=0.5, color='r', linestyle='--', alpha=0.5, label='Random (0.5)')
+            ax4.legend()
+            
+            # Add value labels on bars
+            for bar, value in zip(bars, metrics_values):
+                ax4.text(bar.get_x() + bar.get_width()/2., bar.get_height() + 0.01,
+                        f'{value:.3f}', ha='center', va='bottom', fontweight='bold')
+            
+            plt.suptitle('ROC Analysis - MILK10k ConceptCLIP Classification', 
+                        fontsize=14, fontweight='bold', y=1.02)
+            plt.tight_layout()
+            
+            # Save ROC curves visualization
+            roc_path = self.output_path / "visualizations" / "roc_curves_analysis.png"
+            plt.savefig(roc_path, dpi=300, bbox_inches='tight', facecolor='white')
+            plt.close()
+            print(f"✓ ROC curves saved: {roc_path}")
+            
+        except Exception as e:
+            print(f"❌ Error creating ROC curves: {e}")
 
 
 # ==================== MAIN EXECUTION ====================
@@ -1341,63 +1252,268 @@ def main():
     
     print("="*70)
     print("MILK10K MEDICAL IMAGE CLASSIFICATION PIPELINE - ENHANCED VERSION")
-    print("With Comprehensive Evaluation Metrics for Paper Comparison")
+    print("With Comprehensive Evaluation Metrics and Debug Prints")
     print("Output: /project/def-arashmoh/shahab33/XAI/MILK10k_Training_Input/OnlyResualts")
     print("="*70)
     
-    # Initialize enhanced pipeline
-    pipeline = MILK10kEnhancedClassificationPipeline(
-        dataset_path=DATASET_PATH,
-        groundtruth_path=GROUNDTRUTH_PATH,
-        conceptclip_model_path=CONCEPTCLIP_MODEL_PATH,
-        cache_path=HUGGINGFACE_CACHE_PATH
-    )
-    
-    # Process dataset with comprehensive evaluation
-    report = pipeline.process_dataset()
-    
-    # Print comprehensive summary
-    print("\n" + "="*60)
-    print("MILK10K ENHANCED CLASSIFICATION COMPLETE")
-    print("="*60)
-    
-    # System info
-    print(f"📁 Output Location: {BASE_OUTPUT_PATH}")
-    print(f"🖥️  Device: {report['system_info']['device_used']}")
-    print(f"💾 Cache: {report['system_info']['cache_directory']}")
-    print(f"🔌 Offline mode: {report['system_info']['offline_mode']}")
-    
-    # Dataset info
-    print(f"\n📊 Dataset Statistics:")
-    print(f"   Total images processed: {report['dataset_info']['total_images_found']}")
-    print(f"   Images with ground truth: {report['dataset_info']['total_with_ground_truth']}")
-    print(f"   Successful classifications: {report['processing_stats']['successful_classifications']}")
-    
-    # KEY METRICS FOR PAPER COMPARISON
-    print(f"\n🎯 PAPER COMPARISON METRICS:")
-    print(f"   Accuracy:             {report['paper_comparison_metrics']['accuracy']:.4f}")
-    print(f"   Precision (Macro):    {report['paper_comparison_metrics']['precision_macro']:.4f}")
-    print(f"   Recall (Macro):       {report['paper_comparison_metrics']['recall_macro']:.4f}")
-    print(f"   F1-Score (Macro):     {report['paper_comparison_metrics']['f1_score_macro']:.4f}")
-    print(f"   ROC-AUC (OvR Macro):  {report['paper_comparison_metrics']['roc_auc_ovr_macro']:.4f}")
-    print(f"   ROC-AUC (OvR Weight): {report['paper_comparison_metrics']['roc_auc_ovr_weighted']:.4f}")
-    print(f"   Precision (Weighted): {report['paper_comparison_metrics']['precision_weighted']:.4f}")
-    print(f"   Recall (Weighted):    {report['paper_comparison_metrics']['recall_weighted']:.4f}")
-    print(f"   F1-Score (Weighted):  {report['paper_comparison_metrics']['f1_score_weighted']:.4f}")
-    
-    # Output locations
-    output_path = Path(BASE_OUTPUT_PATH)
-    print(f"\n📂 ALL OUTPUTS SAVED TO:")
-    print(f"   🎯 Main folder: {output_path}")
-    print(f"   🖼️  Processed images: {output_path / 'processed_images'}")
-    print(f"   📋 Classification results: {output_path / 'reports' / 'classification_results.csv'}")
-    print(f"   📊 Comprehensive report: {output_path / 'reports' / 'comprehensive_report.json'}")
-    print(f"   📈 Evaluation metrics: {output_path / 'evaluation_metrics' / 'detailed_metrics.json'}")
-    print(f"   📄 Paper metrics: {output_path / 'evaluation_metrics' / 'paper_comparison_metrics.csv'}")
-    print(f"   📊 Visualizations: {output_path / 'visualizations'}")
-    
-    print(f"\n✅ All outputs saved to: {BASE_OUTPUT_PATH}")
-    print("🎉 Enhanced MILK10k classification pipeline completed successfully!")
+    try:
+        # Initialize enhanced pipeline
+        print("\n=== INITIALIZING PIPELINE ===")
+        pipeline = MILK10kEnhancedClassificationPipeline(
+            dataset_path=DATASET_PATH,
+            groundtruth_path=GROUNDTRUTH_PATH,
+            conceptclip_model_path=CONCEPTCLIP_MODEL_PATH,
+            cache_path=HUGGINGFACE_CACHE_PATH
+        )
+        print("✓ Pipeline initialized successfully")
+        
+        # Process dataset with comprehensive evaluation
+        print("\n=== STARTING DATASET PROCESSING ===")
+        report = pipeline.process_dataset()
+        print("✓ Dataset processing completed")
+        
+        # Print comprehensive summary
+        print("\n" + "="*60)
+        print("MILK10K ENHANCED CLASSIFICATION COMPLETE")
+        print("="*60)
+        
+        # System info
+        print(f"📁 Output Location: {BASE_OUTPUT_PATH}")
+        print(f"🖥️  Device: {report['system_info']['device_used']}")
+        print(f"💾 Cache: {report['system_info']['cache_directory']}")
+        print(f"🔌 Offline mode: {report['system_info']['offline_mode']}")
+        
+        # Dataset info
+        print(f"\n📊 Dataset Statistics:")
+        print(f"   Total images processed: {report['dataset_info']['total_images_found']}")
+        print(f"   Images with ground truth: {report['dataset_info']['total_with_ground_truth']}")
+        print(f"   Successful classifications: {report['processing_stats']['successful_classifications']}")
+        
+        # KEY METRICS FOR PAPER COMPARISON
+        print(f"\n🎯 PAPER COMPARISON METRICS:")
+        print(f"   Accuracy:             {report['paper_comparison_metrics']['accuracy']:.4f}")
+        print(f"   Precision (Macro):    {report['paper_comparison_metrics']['precision_macro']:.4f}")
+        print(f"   Recall (Macro):       {report['paper_comparison_metrics']['recall_macro']:.4f}")
+        print(f"   F1-Score (Macro):     {report['paper_comparison_metrics']['f1_score_macro']:.4f}")
+        print(f"   ROC-AUC (OvR Macro):  {report['paper_comparison_metrics']['roc_auc_ovr_macro']:.4f}")
+        print(f"   ROC-AUC (OvR Weight): {report['paper_comparison_metrics']['roc_auc_ovr_weighted']:.4f}")
+        print(f"   Precision (Weighted): {report['paper_comparison_metrics']['precision_weighted']:.4f}")
+        print(f"   Recall (Weighted):    {report['paper_comparison_metrics']['recall_weighted']:.4f}")
+        print(f"   F1-Score (Weighted):  {report['paper_comparison_metrics']['f1_score_weighted']:.4f}")
+        
+        # Output locations
+        output_path = Path(BASE_OUTPUT_PATH)
+        print(f"\n📂 ALL OUTPUTS SAVED TO:")
+        print(f"   🎯 Main folder: {output_path}")
+        print(f"   🖼️  Processed images: {output_path / 'processed_images'}")
+        print(f"   📋 Classification results: {output_path / 'reports' / 'classification_results.csv'}")
+        print(f"   📊 Comprehensive report: {output_path / 'reports' / 'comprehensive_report.json'}")
+        print(f"   📈 Evaluation metrics: {output_path / 'evaluation_metrics' / 'detailed_metrics.json'}")
+        print(f"   📄 Paper metrics: {output_path / 'evaluation_metrics' / 'paper_comparison_metrics.csv'}")
+        print(f"   📊 Visualizations: {output_path / 'visualizations'}")
+        
+        print(f"\n✅ All outputs saved to: {BASE_OUTPUT_PATH}")
+        print("🎉 Enhanced MILK10k classification pipeline completed successfully!")
+        
+    except Exception as e:
+        print(f"\n❌ CRITICAL ERROR IN MAIN EXECUTION:")
+        print(f"Error: {str(e)}")
+        print("Pipeline failed to complete.")
+        import traceback
+        traceback.print_exc()
 
 if __name__ == "__main__":
-    main()
+    main()subplot(3, 3, 1)
+            if evaluation_metrics['confusion_matrix']:
+                cm = np.array(evaluation_metrics['confusion_matrix'])
+                sns.heatmap(cm, annot=True, fmt='d', cmap='Blues',
+                           xticklabels=evaluation_metrics['class_names'],
+                           yticklabels=evaluation_metrics['class_names'])
+                plt.title('Confusion Matrix')
+                plt.ylabel('True Label')
+                plt.xlabel('Predicted Label')
+                plt.xticks(rotation=45)
+                plt.yticks(rotation=0)
+            
+            # 2. Per-Class Metrics
+            plt.subplot(3, 3, 2)
+            classes = list(evaluation_metrics['per_class_metrics'].keys())
+            precisions = [evaluation_metrics['per_class_metrics'][cls]['precision'] for cls in classes]
+            recalls = [evaluation_metrics['per_class_metrics'][cls]['recall'] for cls in classes]
+            f1s = [evaluation_metrics['per_class_metrics'][cls]['f1_score'] for cls in classes]
+            
+            x = np.arange(len(classes))
+            width = 0.25
+            
+            plt.bar(x - width, precisions, width, label='Precision', alpha=0.8)
+            plt.bar(x, recalls, width, label='Recall', alpha=0.8)
+            plt.bar(x + width, f1s, width, label='F1-Score', alpha=0.8)
+            
+            plt.title('Per-Class Metrics')
+            plt.xlabel('Classes')
+            plt.ylabel('Score')
+            plt.xticks(x, [cls.replace(' ', '\n') for cls in classes], rotation=45)
+            plt.legend()
+            
+            # 3. Prediction Distribution
+            plt.subplot(3, 3, 3)
+            pred_counts = report['predictions']['distribution']
+            plt.bar(pred_counts.keys(), pred_counts.values())
+            plt.title('Prediction Distribution')
+            plt.xlabel('Predicted Class')
+            plt.ylabel('Count')
+            plt.xticks(rotation=45)
+            
+            # 4. Confidence Distribution
+            plt.subplot(3, 3, 4)
+            plt.hist(results_df['prediction_confidence'], bins=30, alpha=0.7, color='green')
+            plt.title('Prediction Confidence Distribution')
+            plt.xlabel('Confidence')
+            plt.ylabel('Frequency')
+            
+            # 5. Accuracy by Confidence Level
+            plt.subplot(3, 3, 5)
+            if 'ground_truth' in results_df.columns:
+                results_with_gt = results_df.dropna(subset=['ground_truth'])
+                if len(results_with_gt) > 0:
+                    conf_bins = np.linspace(0, 1, 11)
+                    accuracies = []
+                    counts = []
+                    for i in range(len(conf_bins)-1):
+                        mask = ((results_with_gt['prediction_confidence'] >= conf_bins[i]) & 
+                               (results_with_gt['prediction_confidence'] < conf_bins[i+1]))
+                        if mask.sum() > 0:
+                            acc = results_with_gt[mask]['correct'].mean()
+                            accuracies.append(acc)
+                            counts.append(mask.sum())
+                        else:
+                            accuracies.append(0)
+                            counts.append(0)
+                    
+                    plt.plot(conf_bins[:-1], accuracies, marker='o', linewidth=2)
+                    plt.title('Accuracy vs Prediction Confidence')
+                    plt.xlabel('Prediction Confidence')
+                    plt.ylabel('Accuracy')
+                    plt.grid(True, alpha=0.3)
+            
+            # 6. Support per Class
+            plt.subplot(3, 3, 6)
+            supports = [evaluation_metrics['per_class_metrics'][cls]['support'] for cls in classes]
+            plt.bar(classes, supports, alpha=0.7, color='orange')
+            plt.title('Support per Class')
+            plt.xlabel('Classes')
+            plt.ylabel('Number of Samples')
+            plt.xticks(rotation=45)
+            
+            # 7. Overall Metrics Comparison
+            plt.subplot(3, 3, 7)
+            metrics_names = ['Accuracy', 'Precision', 'Recall', 'F1-Score']
+            metrics_values = [
+                evaluation_metrics['overview']['accuracy'],
+                evaluation_metrics['overview']['precision_macro'],
+                evaluation_metrics['overview']['recall_macro'],
+                evaluation_metrics['overview']['f1_macro']
+            ]
+            
+            colors = ['red', 'blue', 'green', 'purple']
+            bars = plt.bar(metrics_names, metrics_values, color=colors, alpha=0.7)
+            plt.title('Overall Performance Metrics')
+            plt.ylabel('Score')
+            plt.ylim(0, 1)
+            
+            # Add value labels on bars
+            for bar, value in zip(bars, metrics_values):
+                plt.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.01,
+                        f'{value:.3f}', ha='center', va='bottom', fontweight='bold')
+            
+            # 8. Macro vs Weighted Metrics
+            plt.subplot(3, 3, 8)
+            macro_metrics = [
+                evaluation_metrics['overview']['precision_macro'],
+                evaluation_metrics['overview']['recall_macro'],
+                evaluation_metrics['overview']['f1_macro']
+            ]
+            weighted_metrics = [
+                evaluation_metrics['overview']['precision_weighted'],
+                evaluation_metrics['overview']['recall_weighted'],
+                evaluation_metrics['overview']['f1_weighted']
+            ]
+            
+            x = np.arange(3)
+            width = 0.35
+            
+            plt.bar(x - width/2, macro_metrics, width, label='Macro', alpha=0.8)
+            plt.bar(x + width/2, weighted_metrics, width, label='Weighted', alpha=0.8)
+            
+            plt.title('Macro vs Weighted Metrics')
+            plt.xlabel('Metric Type')
+            plt.ylabel('Score')
+            plt.xticks(x, ['Precision', 'Recall', 'F1-Score'])
+            plt.legend()
+            
+            # 9. Processing Statistics
+            plt.subplot(3, 3, 9)
+            processing_stats = [
+                report['processing_stats']['classification_success_rate'],
+                evaluation_metrics['overview']['accuracy'] if evaluation_metrics['overview']['valid_samples'] > 0 else 0
+            ]
+            
+            plt.bar(['Classification\nSuccess Rate', 'Overall\nAccuracy'], processing_stats,
+                    color=['skyblue', 'lightcoral'], alpha=0.8)
+            plt.title('Processing Success Rates')
+            plt.ylabel('Rate')
+            plt.ylim(0, 1)
+            
+            # Add value labels
+            for i, v in enumerate(processing_stats):
+                plt.text(i, v + 0.01, f'{v:.3f}', ha='center', va='bottom', fontweight='bold')
+            
+            plt.tight_layout()
+            
+            # Save comprehensive visualization
+            viz_path = self.output_path / "visualizations" / "comprehensive_evaluation.png"
+            plt.savefig(viz_path, dpi=300, bbox_inches='tight', facecolor='white')
+            plt.close()
+            print(f"✓ Main visualization saved: {viz_path}")
+            
+            # Create separate confusion matrix with better formatting
+            self._create_detailed_confusion_matrix(evaluation_metrics)
+            
+            # Create ROC curves visualization
+            self._create_roc_curves(evaluation_metrics)
+            
+        except Exception as e:
+            print(f"❌ Error creating visualizations: {e}")
+    
+    def _create_detailed_confusion_matrix(self, evaluation_metrics: Dict):
+        """Create a detailed confusion matrix visualization"""
+        print("Creating detailed confusion matrix...")
+        
+        if not evaluation_metrics['confusion_matrix']:
+            print("⚠️ No confusion matrix data available")
+            return
+        
+        try:
+            plt.figure(figsize=(12, 10))
+            cm = np.array(evaluation_metrics['confusion_matrix'])
+            
+            # Calculate percentages
+            cm_percentage = cm.astype('float') / cm.sum(axis=1)[:, np.newaxis] * 100
+            
+            # Create annotation text
+            annotations = []
+            for i in range(cm.shape[0]):
+                row = []
+                for j in range(cm.shape[1]):
+                    if cm[i, j] > 0:
+                        row.append(f'{cm[i, j]}\n({cm_percentage[i, j]:.1f}%)')
+                    else:
+                        row.append('0\n(0.0%)')
+                annotations.append(row)
+            
+            # Create heatmap
+            sns.heatmap(cm, annot=annotations, fmt='', cmap='Blues', cbar=True,
+                       xticklabels=[cls.replace(' ', '\n') for cls in evaluation_metrics['class_names']],
+                       yticklabels=[cls.replace(' ', '\n') for cls in evaluation_metrics['class_names']])
+            
+            plt.
