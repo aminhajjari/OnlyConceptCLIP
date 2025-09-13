@@ -796,9 +796,9 @@ class MILK10kEnhancedClassificationPipeline:
         
         return None
     
-    def process_dataset(self) -> Dict:
-        """Process entire MILK10k dataset with comprehensive evaluation"""
-        print("\n=== STARTING DATASET PROCESSING ===")
+    def process_dataset(self, max_images: int = 100) -> Dict:
+        """Process MILK10k dataset with limit for testing - comprehensive evaluation"""
+        print(f"\n=== STARTING DATASET PROCESSING (Limited to {max_images} images) ===")
         
         # Find all images
         print("Searching for images in dataset...")
@@ -815,6 +815,12 @@ class MILK10kEnhancedClassificationPipeline:
             print("❌ No images found in dataset!")
             return {}
         
+        # Limit to specified number of images for testing
+        if len(image_files) > max_images:
+            print(f"📊 Limiting processing to first {max_images} images for testing")
+            # Sort for reproducible results
+            image_files = sorted(image_files)[:max_images]
+        
         results = []
         format_counter = Counter()
         
@@ -828,43 +834,63 @@ class MILK10kEnhancedClassificationPipeline:
         successful_classifications = 0
         ground_truth_matches = 0
         
+        # Detailed analysis for first 100 images
+        detailed_results = []
+        
         print(f"\n=== PROCESSING {len(image_files)} IMAGES ===")
         
-        for i, img_path in enumerate(tqdm(image_files, desc="Classifying MILK10k images")):
+        for i, img_path in enumerate(tqdm(image_files, desc=f"Classifying first {max_images} MILK10k images")):
             try:
                 # Track file formats
                 ext = img_path.suffix.lower()
                 format_counter[ext] += 1
                 
+                print(f"\n--- Processing image {i+1}/{len(image_files)}: {img_path.name} ---")
+                
                 # Load and preprocess image
                 image = self.preprocess_image(img_path)
                 if image is None:
-                    print(f"⚠️ Failed to load image: {img_path.name}")
+                    print(f"❌ Failed to load image: {img_path.name}")
                     continue
                 
                 successful_loads += 1
+                print(f"✓ Image loaded successfully, shape: {image.shape}")
                 
                 # Save processed image for reference
                 img_name = img_path.stem
                 processed_img_path = self.output_path / "processed_images" / f"{img_name}_processed.png"
                 cv2.imwrite(str(processed_img_path), cv2.cvtColor(image, cv2.COLOR_RGB2BGR))
+                print(f"✓ Processed image saved: {processed_img_path.name}")
                 
                 # Classify image
                 classification_probs = self.classify_image(image)
                 
                 if classification_probs:
                     successful_classifications += 1
+                    print(f"✓ Classification successful")
+                    # Show top 3 predictions
+                    sorted_probs = sorted(classification_probs.items(), key=lambda x: x[1], reverse=True)
+                    print("   Top 3 predictions:")
+                    for j, (disease, prob) in enumerate(sorted_probs[:3]):
+                        print(f"   {j+1}. {disease}: {prob:.4f}")
+                else:
+                    print("❌ Classification failed")
                 
                 # Get ground truth
                 ground_truth = self.get_ground_truth_label(img_path)
                 if ground_truth:
                     ground_truth_matches += 1
+                    print(f"✓ Ground truth found: {ground_truth}")
+                else:
+                    print("⚠️ No ground truth found")
                 
                 # Get prediction
                 if classification_probs:
                     predicted_disease = max(classification_probs, key=classification_probs.get)
                     prediction_confidence = classification_probs[predicted_disease]
                     proba_list = [classification_probs.get(cls, 0.0) for cls in self.domain.class_names]
+                    
+                    print(f"🎯 Final prediction: {predicted_disease} (confidence: {prediction_confidence:.4f})")
                 else:
                     predicted_disease = "unknown"
                     prediction_confidence = 0.0
@@ -875,6 +901,26 @@ class MILK10kEnhancedClassificationPipeline:
                     y_true.append(ground_truth)
                     y_pred.append(predicted_disease)
                     y_pred_proba.append(proba_list)
+                    
+                    # Check if prediction is correct
+                    is_correct = ground_truth == predicted_disease
+                    status_icon = "✅" if is_correct else "❌"
+                    print(f"{status_icon} Evaluation: Predicted '{predicted_disease}' vs True '{ground_truth}'")
+                
+                # Detailed result for analysis
+                detailed_result = {
+                    'index': i + 1,
+                    'image_name': img_name,
+                    'image_path': str(img_path),
+                    'predicted_disease': predicted_disease,
+                    'prediction_confidence': prediction_confidence,
+                    'ground_truth': ground_truth,
+                    'correct': ground_truth == predicted_disease if ground_truth else None,
+                    'all_probabilities': classification_probs,
+                    'top_3_predictions': sorted_probs[:3] if classification_probs else [],
+                    'processing_status': 'success' if classification_probs else 'failed'
+                }
+                detailed_results.append(detailed_result)
                 
                 # Save results
                 result = {
@@ -892,12 +938,16 @@ class MILK10kEnhancedClassificationPipeline:
                 
                 results.append(result)
                 
-                # Progress indicator every 50 images
-                if (i + 1) % 50 == 0:
-                    print(f"\nProgress update after {i + 1} images:")
-                    print(f"  ✓ Successfully loaded: {successful_loads}")
-                    print(f"  ✓ Successfully classified: {successful_classifications}")
-                    print(f"  ✓ Ground truth matches: {ground_truth_matches}")
+                # Progress indicator every 10 images (more frequent for limited set)
+                if (i + 1) % 10 == 0:
+                    print(f"\n📊 Progress update after {i + 1} images:")
+                    print(f"   ✓ Successfully loaded: {successful_loads}")
+                    print(f"   ✓ Successfully classified: {successful_classifications}")
+                    print(f"   ✓ Ground truth matches: {ground_truth_matches}")
+                    if ground_truth_matches > 0:
+                        correct_predictions = sum(1 for r in results if r['correct'] is True)
+                        accuracy_so_far = correct_predictions / ground_truth_matches
+                        print(f"   📈 Current accuracy: {accuracy_so_far:.4f}")
                 
             except Exception as e:
                 print(f"❌ Error processing {img_path}: {e}")
@@ -906,9 +956,43 @@ class MILK10kEnhancedClassificationPipeline:
         print("\n=== PROCESSING COMPLETE ===")
         print(f"✓ Images processed: {len(results)}")
         print(f"✓ Successful loads: {successful_loads}")
-        print(f"✓ Successful classifications: {successful_classifications}")
+        print(f"✓ Successfully classified: {successful_classifications}")
         print(f"✓ Ground truth matches: {ground_truth_matches}")
         print(f"✓ Valid evaluation samples: {len(y_true)}")
+        
+        # Save detailed analysis for first 100 images
+        print("\n=== SAVING DETAILED ANALYSIS ===")
+        detailed_df = pd.DataFrame(detailed_results)
+        detailed_analysis_path = self.output_path / "reports" / f"detailed_analysis_{max_images}_images.csv"
+        detailed_df.to_csv(detailed_analysis_path, index=False)
+        print(f"✓ Detailed analysis saved: {detailed_analysis_path}")
+        
+        # Print summary of predictions vs ground truth
+        if ground_truth_matches > 0:
+            print(f"\n📊 PREDICTION SUMMARY FOR {max_images} IMAGES:")
+            correct_predictions = sum(1 for r in results if r['correct'] is True)
+            incorrect_predictions = sum(1 for r in results if r['correct'] is False)
+            no_ground_truth = len(results) - ground_truth_matches
+            
+            print(f"   ✅ Correct predictions: {correct_predictions}")
+            print(f"   ❌ Incorrect predictions: {incorrect_predictions}")
+            print(f"   ⚠️  No ground truth: {no_ground_truth}")
+            print(f"   📈 Accuracy on labeled data: {correct_predictions/ground_truth_matches:.4f}")
+            
+            # Show some examples of correct and incorrect predictions
+            print(f"\n🎯 EXAMPLES OF PREDICTIONS:")
+            correct_examples = [r for r in results if r['correct'] is True][:3]
+            incorrect_examples = [r for r in results if r['correct'] is False][:3]
+            
+            if correct_examples:
+                print("   ✅ Correct predictions:")
+                for ex in correct_examples:
+                    print(f"      {ex['image_name']}: Predicted '{ex['predicted_disease']}' (conf: {ex['prediction_confidence']:.3f}) ✓")
+            
+            if incorrect_examples:
+                print("   ❌ Incorrect predictions:")
+                for ex in incorrect_examples:
+                    print(f"      {ex['image_name']}: Predicted '{ex['predicted_disease']}' but was '{ex['ground_truth']}' (conf: {ex['prediction_confidence']:.3f})")
         
         # Calculate comprehensive metrics
         print("\n=== CALCULATING EVALUATION METRICS ===")
@@ -918,11 +1002,19 @@ class MILK10kEnhancedClassificationPipeline:
         print("\n=== GENERATING COMPREHENSIVE REPORT ===")
         report = self._generate_comprehensive_report(results, format_counter, evaluation_metrics)
         
+        # Add testing information to report
+        report['testing_info'] = {
+            'max_images_processed': max_images,
+            'total_images_available': len(image_files) if len(image_files) <= max_images else "More than " + str(max_images),
+            'testing_mode': True,
+            'detailed_analysis_saved': str(detailed_analysis_path)
+        }
+        
         # Save all results and metrics
         print("\n=== SAVING RESULTS ===")
         self._save_comprehensive_results(results, report, evaluation_metrics)
         
-        print("✓ Dataset processing complete!")
+        print(f"✓ Limited dataset processing complete! (Processed {max_images} images)")
         return report
     
     def _generate_comprehensive_report(self, results: List[Dict], format_counter: Counter, 
