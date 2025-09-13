@@ -660,7 +660,7 @@ class MILK10kEnhancedClassificationPipeline:
         print("✓ SECTION: Model loading completed successfully")
         
     def _load_ground_truth(self):
-    """Load ground truth annotations"""
+        """Load ground truth annotations"""
     print("\n=== LOADING GROUND TRUTH ===")
     
     if os.path.exists(self.groundtruth_path):
