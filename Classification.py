@@ -1,9 +1,6 @@
 # MILK10k Medical Image Classification Pipeline - Limited to 100 Images
+# Fixed to handle lesion_id column correctly
 # Modified to process only 100 images with comprehensive debug prints
-#If you later want to process all images, just change line 48:
-
-
-
 
 import os
 import cv2
@@ -660,7 +657,7 @@ class MILK10kEnhancedClassificationPipeline:
         print("✓ SECTION: Model loading completed successfully")
         
     def _load_ground_truth(self):
-        """Load ground truth annotations"""
+        """Load ground truth annotations - FIXED to handle lesion_id column"""
         print("\n=== LOADING GROUND TRUTH ===")
         
         if os.path.exists(self.groundtruth_path):
@@ -669,12 +666,7 @@ class MILK10kEnhancedClassificationPipeline:
                 print(f"✓ Ground truth loaded: {len(self.ground_truth)} samples")
                 print(f"Columns: {list(self.ground_truth.columns)}")
                 
-                # Check for expected MILK10k columns
-                expected_cols = ['AKIEC', 'BCC', 'BEN_OTH', 'BKL', 'DF', 'INF', 'MAL_OTH', 'MEL', 'NV', 'SCCKA', 'VASC']
-                found_cols = [col for col in expected_cols if col in self.ground_truth.columns]
-                print(f"Expected diagnostic columns found: {found_cols}")
-                
-                # Check for lesion_id column
+                # Check for lesion_id column (FIXED - was looking for 'image')
                 if 'lesion_id' in self.ground_truth.columns:
                     print("✓ lesion_id column found for image matching")
                     
@@ -683,6 +675,10 @@ class MILK10kEnhancedClassificationPipeline:
                     print(self.ground_truth.head())
                     
                     # Count non-zero values for each diagnostic column
+                    expected_cols = ['AKIEC', 'BCC', 'BEN_OTH', 'BKL', 'DF', 'INF', 'MAL_OTH', 'MEL', 'NV', 'SCCKA', 'VASC']
+                    found_cols = [col for col in expected_cols if col in self.ground_truth.columns]
+                    print(f"Expected diagnostic columns found: {found_cols}")
+                    
                     print("\nDiagnostic class distribution:")
                     for col in found_cols:
                         count = (self.ground_truth[col] == 1.0).sum()
@@ -690,9 +686,7 @@ class MILK10kEnhancedClassificationPipeline:
                         
                 else:
                     print("⚠️ lesion_id column not found!")
-                    
-                if not found_cols:
-                    print("⚠️ No expected diagnostic columns found. Will use 'dx' column if available.")
+                    print("Available columns:", list(self.ground_truth.columns))
                     
                 print("✓ SECTION: Ground truth loading completed successfully")
                 print("-"*60)
@@ -839,7 +833,7 @@ class MILK10kEnhancedClassificationPipeline:
             if self.debug_mode and (idx + 1) % 10 == 0:
                 print(f"\n  Progress: {idx + 1}/{len(image_files)} images processed")
             
-            # Get image ID from filename
+            # Get image ID from filename (remove extension)
             image_id = image_path.stem
             
             # Preprocess image
@@ -889,28 +883,41 @@ class MILK10kEnhancedClassificationPipeline:
         print("="*60)
     
     def get_ground_truth_label(self, image_id: str) -> Optional[str]:
-        """Get ground truth label for an image"""
+        """Get ground truth label for an image - FIXED to use lesion_id column"""
         if self.ground_truth is None:
             return None
         
-        # Try to find the image in ground truth
-        row = self.ground_truth[self.ground_truth['image'] == image_id]
+        print(f"Debug: Looking for image_id: {image_id}")
+        
+        # Try to find the image in ground truth using lesion_id column
+        row = self.ground_truth[self.ground_truth['lesion_id'] == image_id]
         
         if row.empty:
-            # Try with .jpg extension
-            row = self.ground_truth[self.ground_truth['image'] == f"{image_id}.jpg"]
+            # Try without extension if it was included
+            if '.' in image_id:
+                base_id = image_id.split('.')[0]
+                row = self.ground_truth[self.ground_truth['lesion_id'] == base_id]
         
-        if not row.empty:
-            # Get the diagnosis from MILK10k columns
-            for col, label in self.domain.label_mappings.items():
-                if col in row.columns and row.iloc[0][col] == 1.0:
-                    return label
-            
-            # Try 'dx' column if no one-hot encoding found
-            if 'dx' in row.columns:
-                dx_value = row.iloc[0]['dx']
-                return self.domain.label_mappings.get(dx_value, dx_value)
+        if row.empty:
+            print(f"Debug: No ground truth found for {image_id}")
+            return None
         
+        print(f"Debug: Found ground truth row for {image_id}")
+        
+        # Get the diagnosis from MILK10k one-hot encoded columns
+        for col, label in self.domain.label_mappings.items():
+            if col in row.columns and row.iloc[0][col] == 1.0:
+                print(f"Debug: Found label {label} for column {col}")
+                return label
+        
+        # Try 'dx' column if no one-hot encoding found
+        if 'dx' in row.columns:
+            dx_value = row.iloc[0]['dx']
+            mapped_label = self.domain.label_mappings.get(dx_value, dx_value)
+            print(f"Debug: Found dx value {dx_value}, mapped to {mapped_label}")
+            return mapped_label
+        
+        print(f"Debug: No valid diagnosis found in row")
         return None
     
     def save_results(self, results: List[Dict]):
@@ -936,7 +943,8 @@ class MILK10kEnhancedClassificationPipeline:
             'max_images_limit': self.max_debug_images if self.debug_mode else 'unlimited',
             'unique_predictions': Counter([r['predicted_class'] for r in results]),
             'average_confidence': np.mean([r['max_probability'] for r in results]),
-            'timestamp': datetime.now().isoformat()
+            'timestamp': datetime.now().isoformat(),
+            'images_with_ground_truth': len([r for r in results if r['true_class'] is not None])
         }
         
         summary_path = self.output_path / "reports" / "summary.json"
