@@ -661,48 +661,48 @@ class MILK10kEnhancedClassificationPipeline:
         
     def _load_ground_truth(self):
         """Load ground truth annotations"""
-    print("\n=== LOADING GROUND TRUTH ===")
-    
-    if os.path.exists(self.groundtruth_path):
-        try:
-            self.ground_truth = pd.read_csv(self.groundtruth_path)
-            print(f"✓ Ground truth loaded: {len(self.ground_truth)} samples")
-            print(f"Columns: {list(self.ground_truth.columns)}")
-            
-            # Check for expected MILK10k columns
-            expected_cols = ['AKIEC', 'BCC', 'BEN_OTH', 'BKL', 'DF', 'INF', 'MAL_OTH', 'MEL', 'NV', 'SCCKA', 'VASC']
-            found_cols = [col for col in expected_cols if col in self.ground_truth.columns]
-            print(f"Expected diagnostic columns found: {found_cols}")
-            
-            # Check for lesion_id column
-            if 'lesion_id' in self.ground_truth.columns:
-                print("✓ lesion_id column found for image matching")
+        print("\n=== LOADING GROUND TRUTH ===")
+        
+        if os.path.exists(self.groundtruth_path):
+            try:
+                self.ground_truth = pd.read_csv(self.groundtruth_path)
+                print(f"✓ Ground truth loaded: {len(self.ground_truth)} samples")
+                print(f"Columns: {list(self.ground_truth.columns)}")
                 
-                # Show sample of data
-                print("Sample data:")
-                print(self.ground_truth.head())
+                # Check for expected MILK10k columns
+                expected_cols = ['AKIEC', 'BCC', 'BEN_OTH', 'BKL', 'DF', 'INF', 'MAL_OTH', 'MEL', 'NV', 'SCCKA', 'VASC']
+                found_cols = [col for col in expected_cols if col in self.ground_truth.columns]
+                print(f"Expected diagnostic columns found: {found_cols}")
                 
-                # Count non-zero values for each diagnostic column
-                print("\nDiagnostic class distribution:")
-                for col in found_cols:
-                    count = (self.ground_truth[col] == 1.0).sum()
-                    print(f"  {col}: {count} samples")
+                # Check for lesion_id column
+                if 'lesion_id' in self.ground_truth.columns:
+                    print("✓ lesion_id column found for image matching")
                     
-            else:
-                print("⚠️ lesion_id column not found!")
+                    # Show sample of data
+                    print("Sample data:")
+                    print(self.ground_truth.head())
+                    
+                    # Count non-zero values for each diagnostic column
+                    print("\nDiagnostic class distribution:")
+                    for col in found_cols:
+                        count = (self.ground_truth[col] == 1.0).sum()
+                        print(f"  {col}: {count} samples")
+                        
+                else:
+                    print("⚠️ lesion_id column not found!")
+                    
+                if not found_cols:
+                    print("⚠️ No expected diagnostic columns found. Will use 'dx' column if available.")
+                    
+                print("✓ SECTION: Ground truth loading completed successfully")
+                print("-"*60)
                 
-            if not found_cols:
-                print("⚠️ No expected diagnostic columns found. Will use 'dx' column if available.")
-                
-            print("✓ SECTION: Ground truth loading completed successfully")
-            print("-"*60)
-            
-        except Exception as e:
-            print(f"❌ Error loading ground truth: {e}")
+            except Exception as e:
+                print(f"❌ Error loading ground truth: {e}")
+                self.ground_truth = None
+        else:
+            print(f"❌ Ground truth file not found: {self.groundtruth_path}")
             self.ground_truth = None
-    else:
-        print(f"❌ Ground truth file not found: {self.groundtruth_path}")
-        self.ground_truth = None
     
     def get_image_files(self) -> List[Path]:
         """Get all image files from dataset with DEBUG mode limiting"""
