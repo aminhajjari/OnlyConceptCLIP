@@ -362,170 +362,243 @@ class ComprehensiveEvaluator:
         print(f"✓ Evaluator initialized with {len(class_names)} classes")
         
     def calculate_comprehensive_metrics(self, y_true: List[str], y_pred: List[str], 
-                                      y_pred_proba: Optional[List[List[float]]] = None) -> Dict:
-        print("\n=== CALCULATING COMPREHENSIVE METRICS ===")
-        
-        print(f"Evaluating {len(y_true)} true labels and {len(y_pred)} predictions")
-        
-        label_to_idx = {label: idx for idx, label in enumerate(self.class_names)}
-        y_true_idx = [label_to_idx.get(label, -1) for label in y_true]
-        y_pred_idx = [label_to_idx.get(label, -1) for label in y_pred]
-        
-        valid_indices = [i for i, (true_idx, pred_idx) in enumerate(zip(y_true_idx, y_pred_idx)) 
-                        if true_idx != -1 and pred_idx != -1]
-        
-        print(f"Valid samples for evaluation: {len(valid_indices)}")
-        
-        if not valid_indices:
-            print("❌ No valid samples for evaluation")
-            return self._empty_metrics()
-        
-        y_true_filtered = [y_true_idx[i] for i in valid_indices]
-        y_pred_filtered = [y_pred_idx[i] for i in valid_indices]
-        
-        if y_pred_proba:
-            y_pred_proba_filtered = [y_pred_proba[i] for i in valid_indices]
-            print(f"✓ Probability data available for ROC-AUC calculation")
+                                  y_pred_proba: Optional[List[List[float]]] = None) -> Dict:
+    print("\n=== CALCULATING COMPREHENSIVE METRICS ===")
+    
+    print(f"Evaluating {len(y_true)} true labels and {len(y_pred)} predictions")
+    
+    label_to_idx = {label: idx for idx, label in enumerate(self.class_names)}
+    y_true_idx = [label_to_idx.get(label, -1) for label in y_true]
+    y_pred_idx = [label_to_idx.get(label, -1) for label in y_pred]
+    
+    valid_indices = [i for i, (true_idx, pred_idx) in enumerate(zip(y_true_idx, y_pred_idx)) 
+                    if true_idx != -1 and pred_idx != -1]
+    
+    print(f"Valid samples for evaluation: {len(valid_indices)}")
+    
+    if not valid_indices:
+        print("❌ No valid samples for evaluation")
+        return self._empty_metrics()
+    
+    y_true_filtered = [y_true_idx[i] for i in valid_indices]
+    y_pred_filtered = [y_pred_idx[i] for i in valid_indices]
+    
+    # Find unique classes present in the data
+    unique_classes = sorted(list(set(y_true_filtered + y_pred_filtered)))
+    print(f"Unique classes found in data: {len(unique_classes)} out of {len(self.class_names)}")
+    print(f"Present classes: {[self.class_names[i] for i in unique_classes]}")
+    
+    if y_pred_proba:
+        y_pred_proba_filtered = [y_pred_proba[i] for i in valid_indices]
+        print(f"✓ Probability data available for ROC-AUC calculation")
+    else:
+        y_pred_proba_filtered = None
+        print("⚠️ No probability data available - ROC-AUC will be 0")
+    
+    print("Calculating basic metrics...")
+    accuracy = accuracy_score(y_true_filtered, y_pred_filtered)
+    
+    precision_macro = precision_score(y_true_filtered, y_pred_filtered, average='macro', zero_division=0)
+    recall_macro = recall_score(y_true_filtered, y_pred_filtered, average='macro', zero_division=0)
+    f1_macro = f1_score(y_true_filtered, y_pred_filtered, average='macro', zero_division=0)
+    
+    precision_weighted = precision_score(y_true_filtered, y_pred_filtered, average='weighted', zero_division=0)
+    recall_weighted = recall_score(y_true_filtered, y_pred_filtered, average='weighted', zero_division=0)
+    f1_weighted = f1_score(y_true_filtered, y_pred_filtered, average='weighted', zero_division=0)
+    
+    print(f"✓ Basic metrics calculated - Accuracy: {accuracy:.4f}")
+    
+    print("Calculating per-class metrics...")
+    precision_per_class, recall_per_class, f1_per_class, support_per_class = precision_recall_fscore_support(
+        y_true_filtered, y_pred_filtered, labels=unique_classes, zero_division=0
+    )
+    
+    print("Calculating ROC-AUC metrics...")
+    roc_auc_metrics = self._calculate_roc_auc(y_true_filtered, y_pred_proba_filtered, unique_classes)
+    
+    print("Creating confusion matrix...")
+    cm = confusion_matrix(y_true_filtered, y_pred_filtered, labels=unique_classes)
+    
+    print("Generating classification report...")
+    # Only use class names for classes that are actually present
+    present_class_names = [self.class_names[i] for i in unique_classes]
+    class_report = classification_report(
+        y_true_filtered, y_pred_filtered,
+        labels=unique_classes,  # Specify the actual labels present
+        target_names=present_class_names,  # Only names for present classes
+        output_dict=True, zero_division=0
+    )
+    
+    # Create per-class metrics dictionary for ALL classes (including absent ones)
+    per_class_metrics = {}
+    for i, class_name in enumerate(self.class_names):
+        if i in unique_classes:
+            # Class is present in data
+            class_idx_in_unique = unique_classes.index(i)
+            per_class_metrics[class_name] = {
+                'precision': float(precision_per_class[class_idx_in_unique]),
+                'recall': float(recall_per_class[class_idx_in_unique]),
+                'f1_score': float(f1_per_class[class_idx_in_unique]),
+                'support': int(support_per_class[class_idx_in_unique]),
+                'roc_auc': roc_auc_metrics['per_class'].get(i, 0.0)
+            }
         else:
-            y_pred_proba_filtered = None
-            print("⚠️ No probability data available - ROC-AUC will be 0")
+            # Class is absent from data
+            per_class_metrics[class_name] = {
+                'precision': 0.0,
+                'recall': 0.0,
+                'f1_score': 0.0,
+                'support': 0,
+                'roc_auc': 0.0
+            }
+    
+    metrics = {
+        'overview': {
+            'total_samples': len(y_true),
+            'valid_samples': len(valid_indices),
+            'unique_classes_present': len(unique_classes),
+            'total_classes_expected': len(self.class_names),
+            'accuracy': accuracy,
+            'precision_macro': precision_macro,
+            'recall_macro': recall_macro,
+            'f1_macro': f1_macro,
+            'precision_weighted': precision_weighted,
+            'recall_weighted': recall_weighted,
+            'f1_weighted': f1_weighted,
+            'roc_auc_ovr_macro': roc_auc_metrics['ovr_macro'],
+            'roc_auc_ovr_weighted': roc_auc_metrics['ovr_weighted'],
+            'roc_auc_ovo_macro': roc_auc_metrics['ovo_macro'],
+            'roc_auc_ovo_weighted': roc_auc_metrics['ovo_weighted']
+        },
+        'per_class_metrics': per_class_metrics,
+        'confusion_matrix': cm.tolist(),
+        'classification_report': class_report,
+        'class_names': self.class_names,
+        'present_classes': present_class_names,
+        'unique_class_indices': unique_classes,
+        'roc_curves': roc_auc_metrics.get('curves', {})
+    }
+    
+    print("✓ Comprehensive metrics calculation complete")
+    print("✓ SECTION: Metrics calculation completed successfully")
+    print("-"*60)
+    return metrics
+    
+    def _calculate_roc_auc(self, y_true: List[int], y_pred_proba: Optional[List[List[float]]], 
+                       unique_classes: List[int]) -> Dict:
+    if y_pred_proba is None or len(y_pred_proba) == 0:
+        print("⚠️ No probability data - returning zero ROC-AUC scores")
+        return {
+            'ovr_macro': 0.0,
+            'ovr_weighted': 0.0,
+            'ovo_macro': 0.0,
+            'ovo_weighted': 0.0,
+            'per_class': {i: 0.0 for i in range(len(self.class_names))},
+            'curves': {}
+        }
+    
+    try:
+        print("Calculating ROC-AUC scores...")
+        y_true_array = np.array(y_true)
+        y_pred_proba_array = np.array(y_pred_proba)
         
-        print("Calculating basic metrics...")
-        accuracy = accuracy_score(y_true_filtered, y_pred_filtered)
+        # For multiclass ROC-AUC with missing classes, we need to be careful
+        if len(unique_classes) < 2:
+            print("⚠️ Need at least 2 classes for ROC-AUC calculation")
+            return {
+                'ovr_macro': 0.0,
+                'ovr_weighted': 0.0,
+                'ovo_macro': 0.0,
+                'ovo_weighted': 0.0,
+                'per_class': {i: 0.0 for i in range(len(self.class_names))},
+                'curves': {}
+            }
         
-        precision_macro = precision_score(y_true_filtered, y_pred_filtered, average='macro', zero_division=0)
-        recall_macro = recall_score(y_true_filtered, y_pred_filtered, average='macro', zero_division=0)
-        f1_macro = f1_score(y_true_filtered, y_pred_filtered, average='macro', zero_division=0)
+        # Binarize for One-vs-Rest (OvR) calculation
+        y_true_binarized = label_binarize(y_true_array, classes=unique_classes)
         
-        precision_weighted = precision_score(y_true_filtered, y_pred_filtered, average='weighted', zero_division=0)
-        recall_weighted = recall_score(y_true_filtered, y_pred_filtered, average='weighted', zero_division=0)
-        f1_weighted = f1_score(y_true_filtered, y_pred_filtered, average='weighted', zero_division=0)
+        # Ensure we have the right number of probability columns
+        if y_pred_proba_array.shape[1] == len(self.class_names):
+            # Use only columns corresponding to unique classes
+            y_pred_proba_filtered = y_pred_proba_array[:, unique_classes]
+        else:
+            # Assume probabilities match unique classes
+            y_pred_proba_filtered = y_pred_proba_array
         
-        print(f"✓ Basic metrics calculated - Accuracy: {accuracy:.4f}")
+        # Calculate OvR ROC-AUC only if we have valid data
+        if y_true_binarized.shape[1] > 1 and y_pred_proba_filtered.shape[1] > 1:
+            roc_auc_ovr_macro = roc_auc_score(y_true_binarized, y_pred_proba_filtered, 
+                                            average='macro', multi_class='ovr')
+            roc_auc_ovr_weighted = roc_auc_score(y_true_binarized, y_pred_proba_filtered, 
+                                               average='weighted', multi_class='ovr')
+        else:
+            roc_auc_ovr_macro = 0.0
+            roc_auc_ovr_weighted = 0.0
         
-        print("Calculating per-class metrics...")
-        precision_per_class, recall_per_class, f1_per_class, support_per_class = precision_recall_fscore_support(
-            y_true_filtered, y_pred_filtered, labels=list(range(len(self.class_names))), zero_division=0
-        )
+        # Calculate OvO ROC-AUC using the original arrays
+        try:
+            roc_auc_ovo_macro = roc_auc_score(y_true_array, y_pred_proba_filtered, 
+                                            average='macro', multi_class='ovo')
+            roc_auc_ovo_weighted = roc_auc_score(y_true_array, y_pred_proba_filtered, 
+                                               average='weighted', multi_class='ovo')
+        except ValueError as e:
+            print(f"⚠️ OvO ROC-AUC calculation failed: {e}")
+            roc_auc_ovo_macro = 0.0
+            roc_auc_ovo_weighted = 0.0
         
-        print("Calculating ROC-AUC metrics...")
-        roc_auc_metrics = self._calculate_roc_auc(y_true_filtered, y_pred_proba_filtered)
+        print(f"✓ ROC-AUC OvR Macro: {roc_auc_ovr_macro:.4f}")
         
-        print("Creating confusion matrix...")
-        cm = confusion_matrix(y_true_filtered, y_pred_filtered, labels=list(range(len(self.class_names))))
+        # Calculate per-class AUC
+        per_class_auc = {i: 0.0 for i in range(len(self.class_names))}
+        curves = {}
         
-        print("Generating classification report...")
-        class_report = classification_report(
-            y_true_filtered, y_pred_filtered,
-            target_names=[self.class_names[i] for i in range(len(self.class_names))],
-            output_dict=True, zero_division=0
-        )
+        for idx, class_idx in enumerate(unique_classes):
+            if class_idx < len(self.class_names):
+                class_name = self.class_names[class_idx]
+                try:
+                    if idx < y_true_binarized.shape[1] and idx < y_pred_proba_filtered.shape[1]:
+                        if np.sum(y_true_binarized[:, idx]) > 0:  # Check if class has positive samples
+                            fpr, tpr, thresholds = roc_curve(y_true_binarized[:, idx], 
+                                                           y_pred_proba_filtered[:, idx])
+                            auc_score = auc(fpr, tpr)
+                            per_class_auc[class_idx] = float(auc_score)
+                            curves[class_name] = {
+                                'fpr': fpr.tolist(),
+                                'tpr': tpr.tolist(),
+                                'auc': float(auc_score)
+                            }
+                        else:
+                            per_class_auc[class_idx] = 0.0
+                    else:
+                        per_class_auc[class_idx] = 0.0
+                except Exception as e:
+                    print(f"⚠️ Error calculating AUC for class {class_name}: {e}")
+                    per_class_auc[class_idx] = 0.0
         
-        metrics = {
-            'overview': {
-                'total_samples': len(y_true),
-                'valid_samples': len(valid_indices),
-                'accuracy': accuracy,
-                'precision_macro': precision_macro,
-                'recall_macro': recall_macro,
-                'f1_macro': f1_macro,
-                'precision_weighted': precision_weighted,
-                'recall_weighted': recall_weighted,
-                'f1_weighted': f1_weighted,
-                'roc_auc_ovr_macro': roc_auc_metrics['ovr_macro'],
-                'roc_auc_ovr_weighted': roc_auc_metrics['ovr_weighted'],
-                'roc_auc_ovo_macro': roc_auc_metrics['ovo_macro'],
-                'roc_auc_ovo_weighted': roc_auc_metrics['ovo_weighted']
-            },
-            'per_class_metrics': {
-                self.class_names[i]: {
-                    'precision': float(precision_per_class[i]),
-                    'recall': float(recall_per_class[i]),
-                    'f1_score': float(f1_per_class[i]),
-                    'support': int(support_per_class[i]),
-                    'roc_auc': roc_auc_metrics['per_class'][i] if i < len(roc_auc_metrics['per_class']) else 0.0
-                } for i in range(len(self.class_names))
-            },
-            'confusion_matrix': cm.tolist(),
-            'classification_report': class_report,
-            'class_names': self.class_names,
-            'roc_curves': roc_auc_metrics.get('curves', {})
+        print("✓ Per-class ROC-AUC calculated")
+        print("✓ SECTION: ROC-AUC calculation completed successfully")
+        
+        return {
+            'ovr_macro': float(roc_auc_ovr_macro),
+            'ovr_weighted': float(roc_auc_ovr_weighted),
+            'ovo_macro': float(roc_auc_ovo_macro),
+            'ovo_weighted': float(roc_auc_ovo_weighted),
+            'per_class': per_class_auc,
+            'curves': curves
         }
         
-        print("✓ Comprehensive metrics calculation complete")
-        print("✓ SECTION: Metrics calculation completed successfully")
-        print("-"*60)
-        return metrics
-    
-    def _calculate_roc_auc(self, y_true: List[int], y_pred_proba: Optional[List[List[float]]]) -> Dict:
-        if y_pred_proba is None or len(y_pred_proba) == 0:
-            print("⚠️ No probability data - returning zero ROC-AUC scores")
-            return {
-                'ovr_macro': 0.0,
-                'ovr_weighted': 0.0,
-                'ovo_macro': 0.0,
-                'ovo_weighted': 0.0,
-                'per_class': [0.0] * len(self.class_names),
-                'curves': {}
-            }
-        
-        try:
-            print("Calculating ROC-AUC scores...")
-            y_true_array = np.array(y_true)
-            y_pred_proba_array = np.array(y_pred_proba)
-            
-            y_true_binarized = label_binarize(y_true_array, classes=list(range(len(self.class_names))))
-            
-            roc_auc_ovr_macro = roc_auc_score(y_true_binarized, y_pred_proba_array, average='macro', multi_class='ovr')
-            roc_auc_ovr_weighted = roc_auc_score(y_true_binarized, y_pred_proba_array, average='weighted', multi_class='ovr')
-            
-            roc_auc_ovo_macro = roc_auc_score(y_true_array, y_pred_proba_array, average='macro', multi_class='ovo')
-            roc_auc_ovo_weighted = roc_auc_score(y_true_array, y_pred_proba_array, average='weighted', multi_class='ovo')
-            
-            print(f"✓ ROC-AUC OvR Macro: {roc_auc_ovr_macro:.4f}")
-            
-            per_class_auc = []
-            curves = {}
-            
-            for i in range(len(self.class_names)):
-                if i < y_true_binarized.shape[1] and i < y_pred_proba_array.shape[1]:
-                    if np.sum(y_true_binarized[:, i]) > 0:
-                        fpr, tpr, thresholds = roc_curve(y_true_binarized[:, i], y_pred_proba_array[:, i])
-                        auc_score = auc(fpr, tpr)
-                        per_class_auc.append(float(auc_score))
-                        curves[self.class_names[i]] = {
-                            'fpr': fpr.tolist(),
-                            'tpr': tpr.tolist(),
-                            'auc': float(auc_score)
-                        }
-                    else:
-                        per_class_auc.append(0.0)
-                else:
-                    per_class_auc.append(0.0)
-            
-            print("✓ Per-class ROC-AUC calculated")
-            print("✓ SECTION: ROC-AUC calculation completed successfully")
-            
-            return {
-                'ovr_macro': float(roc_auc_ovr_macro),
-                'ovr_weighted': float(roc_auc_ovr_weighted),
-                'ovo_macro': float(roc_auc_ovo_macro),
-                'ovo_weighted': float(roc_auc_ovo_weighted),
-                'per_class': per_class_auc,
-                'curves': curves
-            }
-            
-        except Exception as e:
-            print(f"❌ Error calculating ROC-AUC: {e}")
-            return {
-                'ovr_macro': 0.0,
-                'ovr_weighted': 0.0,
-                'ovo_macro': 0.0,
-                'ovo_weighted': 0.0,
-                'per_class': [0.0] * len(self.class_names),
-                'curves': {}
-            }
-    
+    except Exception as e:
+        print(f"❌ Error calculating ROC-AUC: {e}")
+        import traceback
+        traceback.print_exc()
+        return {
+            'ovr_macro': 0.0,
+            'ovr_weighted': 0.0,
+            'ovo_macro': 0.0,
+            'ovo_weighted': 0.0,
+            'per_class': {i: 0.0 for i in range(len(self.class_names))},
+            'curves': {}
+        }
     def _empty_metrics(self) -> Dict:
         return {
             'overview': {
@@ -1031,35 +1104,73 @@ class MILK10kConceptCLIPPipeline:
         }
     
     def print_summary_metrics(self, metrics: Dict):
-        """Print summary of evaluation metrics"""
-        print("\n" + "="*60)
-        print(" EVALUATION SUMMARY ".center(60))
-        print("="*60)
-        
-        overview = metrics['overview']
-        print(f"Total samples: {overview['total_samples']}")
-        print(f"Valid samples for evaluation: {overview['valid_samples']}")
-        print(f"Accuracy: {overview['accuracy']:.4f}")
-        print(f"Precision (macro): {overview['precision_macro']:.4f}")
-        print(f"Recall (macro): {overview['recall_macro']:.4f}")
-        print(f"F1-score (macro): {overview['f1_macro']:.4f}")
-        print(f"F1-score (weighted): {overview['f1_weighted']:.4f}")
-        print(f"ROC-AUC OvR (macro): {overview['roc_auc_ovr_macro']:.4f}")
-        print(f"ROC-AUC OvR (weighted): {overview['roc_auc_ovr_weighted']:.4f}")
-        print(f"ROC-AUC OvO (macro): {overview['roc_auc_ovo_macro']:.4f}")
-        print(f"ROC-AUC OvO (weighted): {overview['roc_auc_ovo_weighted']:.4f}")
-        
-        print("\n" + "-"*40)
-        print(" TOP 5 PERFORMING CLASSES ".center(40))
-        print("-"*40)
-        
-        class_f1_scores = [(name, metrics['f1_score']) for name, metrics in metrics['per_class_metrics'].items()]
-        class_f1_scores.sort(key=lambda x: x[1], reverse=True)
-        
+    """Print summary of evaluation metrics"""
+    print("\n" + "="*60)
+    print(" EVALUATION SUMMARY ".center(60))
+    print("="*60)
+    
+    overview = metrics['overview']
+    print(f"Total samples: {overview['total_samples']}")
+    print(f"Valid samples for evaluation: {overview['valid_samples']}")
+    print(f"Classes present in data: {overview.get('unique_classes_present', 'N/A')}/{overview.get('total_classes_expected', len(self.class_names))}")
+    print(f"Accuracy: {overview['accuracy']:.4f}")
+    print(f"Precision (macro): {overview['precision_macro']:.4f}")
+    print(f"Recall (macro): {overview['recall_macro']:.4f}")
+    print(f"F1-score (macro): {overview['f1_macro']:.4f}")
+    print(f"F1-score (weighted): {overview['f1_weighted']:.4f}")
+    print(f"ROC-AUC OvR (macro): {overview['roc_auc_ovr_macro']:.4f}")
+    print(f"ROC-AUC OvR (weighted): {overview['roc_auc_ovr_weighted']:.4f}")
+    print(f"ROC-AUC OvO (macro): {overview['roc_auc_ovo_macro']:.4f}")
+    print(f"ROC-AUC OvO (weighted): {overview['roc_auc_ovo_weighted']:.4f}")
+    
+    print("\n" + "-"*50)
+    print(" CLASSES PRESENT IN DATA ".center(50))
+    print("-"*50)
+    
+    present_classes = metrics.get('present_classes', [])
+    if present_classes:
+        for i, class_name in enumerate(present_classes, 1):
+            class_metrics = metrics['per_class_metrics'].get(class_name, {})
+            support = class_metrics.get('support', 0)
+            f1_score = class_metrics.get('f1_score', 0)
+            print(f"{i}. {class_name}: F1={f1_score:.4f}, Support={support}")
+    else:
+        print("No class information available")
+    
+    print("\n" + "-"*50)
+    print(" TOP 5 PERFORMING CLASSES (BY F1-SCORE) ".center(50))
+    print("-"*50)
+    
+    # Get classes with non-zero support (actually present in data)
+    class_f1_scores = []
+    for name, class_metrics in metrics['per_class_metrics'].items():
+        if class_metrics.get('support', 0) > 0:  # Only include classes with data
+            class_f1_scores.append((name, class_metrics['f1_score']))
+    
+    class_f1_scores.sort(key=lambda x: x[1], reverse=True)
+    
+    if class_f1_scores:
         for i, (class_name, f1_score) in enumerate(class_f1_scores[:5], 1):
-            print(f"{i}. {class_name}: F1={f1_score:.4f}")
-        
-        print("="*60)
+            support = metrics['per_class_metrics'][class_name]['support']
+            print(f"{i}. {class_name}: F1={f1_score:.4f} (n={support})")
+    else:
+        print("No classes with valid performance metrics found")
+    
+    print("\n" + "-"*50)
+    print(" CLASSES WITH ZERO SUPPORT ".center(50))
+    print("-"*50)
+    
+    zero_support_classes = [name for name, class_metrics in metrics['per_class_metrics'].items() 
+                           if class_metrics.get('support', 0) == 0]
+    
+    if zero_support_classes:
+        print(f"Classes not present in evaluation data ({len(zero_support_classes)}):")
+        for class_name in zero_support_classes:
+            print(f"  - {class_name}")
+    else:
+        print("All classes have samples in the evaluation data")
+    
+    print("="*60)
 
 
 # ==================== MAIN EXECUTION ====================
