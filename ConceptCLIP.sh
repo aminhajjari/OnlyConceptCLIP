@@ -21,7 +21,7 @@ OUTPUT_PATH="$PROJECT_DIR/OnlyResualts"
 # ==================== LOAD MODULES ====================
 module load python/3.11.5
 module load cuda/12.6
-
+module load opencv/4.12.0
 # ==================== VENV ====================
 source "$VENV_DIR/bin/activate"
 
