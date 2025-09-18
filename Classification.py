@@ -894,4 +894,213 @@ class MILK10kConceptCLIPPipeline:
         df.to_csv(csv_path, index=False)
         print(f"✓ Results saved to CSV: {csv_path}")
         
-        json_path = self.output_path / "classifications
+        json_path = self.output_path / "classifications" / "conceptclip_results.json"
+        with open(json_path, 'w') as f:
+            json.dump(results, f, indent=2)
+        print(f"✓ Results saved to JSON: {json_path}")
+        print("✓ SECTION: Results saving completed successfully")
+    
+    def save_metrics(self, metrics: Dict):
+        """Save evaluation metrics"""
+        print("\n=== SAVING METRICS ===")
+        
+        metrics_path = self.output_path / "evaluation_metrics" / "conceptclip_comprehensive_metrics.json"
+        with open(metrics_path, 'w') as f:
+            json.dump(metrics, f, indent=2)
+        print(f"✓ Comprehensive metrics saved: {metrics_path}")
+        
+        summary_path = self.output_path / "evaluation_metrics" / "conceptclip_summary.txt"
+        with open(summary_path, 'w') as f:
+            f.write("MILK10k ConceptCLIP-only Classification Results Summary\n")
+            f.write("="*60 + "\n\n")
+            
+            overview = metrics['overview']
+            f.write(f"Total samples: {overview['total_samples']}\n")
+            f.write(f"Valid samples: {overview['valid_samples']}\n")
+            f.write(f"Accuracy: {overview['accuracy']:.4f}\n")
+            f.write(f"Precision (macro): {overview['precision_macro']:.4f}\n")
+            f.write(f"Recall (macro): {overview['recall_macro']:.4f}\n")
+            f.write(f"F1-score (macro): {overview['f1_macro']:.4f}\n")
+            f.write(f"ROC-AUC OvR (macro): {overview['roc_auc_ovr_macro']:.4f}\n")
+            f.write(f"ROC-AUC OvR (weighted): {overview['roc_auc_ovr_weighted']:.4f}\n")
+            f.write(f"ROC-AUC OvO (macro): {overview['roc_auc_ovo_macro']:.4f}\n")
+            f.write(f"ROC-AUC OvO (weighted): {overview['roc_auc_ovo_weighted']:.4f}\n\n")
+            
+            f.write("Per-class Metrics:\n")
+            f.write("-" * 40 + "\n")
+            for class_name, class_metrics in metrics['per_class_metrics'].items():
+                f.write(f"{class_name}:\n")
+                f.write(f"  Precision: {class_metrics['precision']:.4f}\n")
+                f.write(f"  Recall: {class_metrics['recall']:.4f}\n")
+                f.write(f"  F1-score: {class_metrics['f1_score']:.4f}\n")
+                f.write(f"  Support: {class_metrics['support']}\n")
+                f.write(f"  ROC-AUC: {class_metrics['roc_auc']:.4f}\n\n")
+        
+        print(f"✓ Summary saved: {summary_path}")
+        print("✓ SECTION: Metrics saving completed successfully")
+    
+    def save_comparison_data(self, results: List[Dict], metrics: Dict):
+        """Save comparison data for analysis"""
+        print("\n=== SAVING COMPARISON DATA ===")
+        
+        comparison_data = {
+            'metadata': {
+                'method': 'ConceptCLIP-only',
+                'total_images': len(results),
+                'total_folders': self.max_folders,
+                'timestamp': datetime.now().isoformat(),
+                'model_info': {
+                    'type': 'ConceptCLIP',
+                    'model_path': str(self.conceptclip_model_path),
+                    'device': str(self.device)
+                }
+            },
+            'performance_summary': metrics['overview'],
+            'per_class_performance': metrics['per_class_metrics'],
+            'detailed_results': results[:100],  # Save first 100 detailed results
+            'class_distribution': self._calculate_class_distribution(results),
+            'confidence_statistics': self._calculate_confidence_stats(results)
+        }
+        
+        comparison_path = self.output_path / "comparison_data" / "conceptclip_comparison_data.json"
+        with open(comparison_path, 'w') as f:
+            json.dump(comparison_data, f, indent=2)
+        print(f"✓ Comparison data saved: {comparison_path}")
+        
+        print("✓ SECTION: Comparison data saving completed successfully")
+    
+    def save_basic_comparison_data(self, results: List[Dict]):
+        """Save basic comparison data when no ground truth is available"""
+        print("\n=== SAVING BASIC COMPARISON DATA ===")
+        
+        comparison_data = {
+            'metadata': {
+                'method': 'ConceptCLIP-only',
+                'total_images': len(results),
+                'total_folders': self.max_folders,
+                'timestamp': datetime.now().isoformat(),
+                'model_info': {
+                    'type': 'ConceptCLIP',
+                    'model_path': str(self.conceptclip_model_path),
+                    'device': str(self.device)
+                },
+                'note': 'No ground truth available - predictions only'
+            },
+            'prediction_summary': {
+                'total_predictions': len(results),
+                'successful_predictions': len([r for r in results if r['predicted_class']]),
+                'average_confidence': np.mean([r['prediction_confidence'] for r in results if r['prediction_confidence']]),
+                'prediction_distribution': self._calculate_class_distribution(results)
+            },
+            'detailed_results': results[:100],  # Save first 100 detailed results
+            'confidence_statistics': self._calculate_confidence_stats(results)
+        }
+        
+        comparison_path = self.output_path / "comparison_data" / "conceptclip_basic_comparison_data.json"
+        with open(comparison_path, 'w') as f:
+            json.dump(comparison_data, f, indent=2)
+        print(f"✓ Basic comparison data saved: {comparison_path}")
+        
+        print("✓ SECTION: Basic comparison data saving completed successfully")
+    
+    def _calculate_class_distribution(self, results: List[Dict]) -> Dict:
+        """Calculate class distribution from results"""
+        pred_counts = Counter([r['predicted_class'] for r in results if r['predicted_class']])
+        true_counts = Counter([r['true_class'] for r in results if r['true_class']])
+        
+        return {
+            'predicted_distribution': dict(pred_counts),
+            'true_distribution': dict(true_counts) if true_counts else {}
+        }
+    
+    def _calculate_confidence_stats(self, results: List[Dict]) -> Dict:
+        """Calculate confidence statistics"""
+        confidences = [r['prediction_confidence'] for r in results if r['prediction_confidence']]
+        
+        if not confidences:
+            return {}
+        
+        return {
+            'mean_confidence': float(np.mean(confidences)),
+            'median_confidence': float(np.median(confidences)),
+            'std_confidence': float(np.std(confidences)),
+            'min_confidence': float(np.min(confidences)),
+            'max_confidence': float(np.max(confidences)),
+            'q25_confidence': float(np.percentile(confidences, 25)),
+            'q75_confidence': float(np.percentile(confidences, 75))
+        }
+    
+    def print_summary_metrics(self, metrics: Dict):
+        """Print summary of evaluation metrics"""
+        print("\n" + "="*60)
+        print(" EVALUATION SUMMARY ".center(60))
+        print("="*60)
+        
+        overview = metrics['overview']
+        print(f"Total samples: {overview['total_samples']}")
+        print(f"Valid samples for evaluation: {overview['valid_samples']}")
+        print(f"Accuracy: {overview['accuracy']:.4f}")
+        print(f"Precision (macro): {overview['precision_macro']:.4f}")
+        print(f"Recall (macro): {overview['recall_macro']:.4f}")
+        print(f"F1-score (macro): {overview['f1_macro']:.4f}")
+        print(f"F1-score (weighted): {overview['f1_weighted']:.4f}")
+        print(f"ROC-AUC OvR (macro): {overview['roc_auc_ovr_macro']:.4f}")
+        print(f"ROC-AUC OvR (weighted): {overview['roc_auc_ovr_weighted']:.4f}")
+        print(f"ROC-AUC OvO (macro): {overview['roc_auc_ovo_macro']:.4f}")
+        print(f"ROC-AUC OvO (weighted): {overview['roc_auc_ovo_weighted']:.4f}")
+        
+        print("\n" + "-"*40)
+        print(" TOP 5 PERFORMING CLASSES ".center(40))
+        print("-"*40)
+        
+        class_f1_scores = [(name, metrics['f1_score']) for name, metrics in metrics['per_class_metrics'].items()]
+        class_f1_scores.sort(key=lambda x: x[1], reverse=True)
+        
+        for i, (class_name, f1_score) in enumerate(class_f1_scores[:5], 1):
+            print(f"{i}. {class_name}: F1={f1_score:.4f}")
+        
+        print("="*60)
+
+
+# ==================== MAIN EXECUTION ====================
+
+def main():
+    """Main execution function"""
+    print("\n" + "="*80)
+    print(" MILK10K CONCEPTCLIP-ONLY CLASSIFICATION PIPELINE ".center(80))
+    print(" INITIALIZATION ".center(80))
+    print("="*80)
+    
+    try:
+        pipeline = MILK10kConceptCLIPPipeline(
+            dataset_path=DATASET_PATH,
+            groundtruth_path=GROUNDTRUTH_PATH,
+            conceptclip_model_path=CONCEPTCLIP_MODEL_PATH,
+            cache_path=HUGGINGFACE_CACHE_PATH
+        )
+        
+        print("\n✓ Pipeline initialized successfully")
+        print("Starting classification process...")
+        
+        pipeline.run_classification()
+        
+        print("\n" + "="*80)
+        print(" PIPELINE EXECUTION COMPLETED SUCCESSFULLY ".center(80))
+        print("="*80)
+        
+    except Exception as e:
+        print(f"\n❌ Pipeline execution failed: {e}")
+        import traceback
+        traceback.print_exc()
+        
+        print("\n" + "="*80)
+        print(" PIPELINE EXECUTION FAILED ".center(80))
+        print("="*80)
+        return 1
+    
+    return 0
+
+
+if __name__ == "__main__":
+    exit_code = main()
+    exit(exit_code)
