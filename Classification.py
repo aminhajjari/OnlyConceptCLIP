@@ -37,9 +37,11 @@ try:
     from ConceptModel.modeling_conceptclip import ConceptCLIP
     from ConceptModel.preprocessor_conceptclip import ConceptCLIPProcessor
     print("✓ ConceptCLIP modules imported successfully")
+    CONCEPTCLIP_AVAILABLE = True
 except ImportError as e:
     print(f"⚠️ ConceptCLIP import error: {e}")
     print("Will use dummy models for testing")
+    CONCEPTCLIP_AVAILABLE = False
 
 print("✓ SECTION: Module imports completed successfully")
 print("-"*60)
@@ -183,16 +185,33 @@ def setup_offline_environment(cache_path: str):
 def load_local_conceptclip_models(model_path: str, cache_path: str, device: str):
     """Load local ConceptCLIP models with offline support"""
     print("\n=== LOADING CONCEPTCLIP MODELS ===")
+    
+    if not CONCEPTCLIP_AVAILABLE:
+        print("❌ ConceptCLIP modules not available - creating dummy model")
+        dummy_model = create_dummy_conceptclip_model(device)
+        dummy_processor = create_simple_processor()
+        print("✓ SECTION: Dummy model creation completed successfully")
+        print("-"*60)
+        return dummy_model, dummy_processor
+    
     try:
         setup_offline_environment(cache_path)
         
         print(f"Loading ConceptCLIP from local path: {model_path}")
         print(f"Using cache directory: {cache_path}")
         
+        # Check if model path exists
+        model_path_obj = Path(model_path)
+        if not model_path_obj.exists():
+            raise FileNotFoundError(f"Model path does not exist: {model_path}")
+        
+        # Try to load the model
         model = ConceptCLIP.from_pretrained(
             model_path,
             local_files_only=True,
-            cache_dir=cache_path
+            cache_dir=cache_path,
+            torch_dtype=torch.float32,
+            trust_remote_code=True
         )
         print("✓ ConceptCLIP model loaded")
         
@@ -200,7 +219,8 @@ def load_local_conceptclip_models(model_path: str, cache_path: str, device: str)
             processor = ConceptCLIPProcessor.from_pretrained(
                 model_path,
                 local_files_only=True,
-                cache_dir=cache_path
+                cache_dir=cache_path,
+                trust_remote_code=True
             )
             print("✓ ConceptCLIP processor loaded")
         except Exception as e:
@@ -218,6 +238,8 @@ def load_local_conceptclip_models(model_path: str, cache_path: str, device: str)
         
     except Exception as e:
         print(f"❌ Error loading local ConceptCLIP: {e}")
+        import traceback
+        traceback.print_exc()
         print("Creating dummy ConceptCLIP model for testing...")
         dummy_model = create_dummy_conceptclip_model(device)
         dummy_processor = create_simple_processor()
@@ -367,63 +389,95 @@ class ComprehensiveEvaluator:
         
         print(f"Evaluating {len(y_true)} true labels and {len(y_pred)} predictions")
         
-        label_to_idx = {label: idx for idx, label in enumerate(self.class_names)}
-        y_true_idx = [label_to_idx.get(label, -1) for label in y_true]
-        y_pred_idx = [label_to_idx.get(label, -1) for label in y_pred]
+        # Clean and validate input data
+        y_true_cleaned = []
+        y_pred_cleaned = []
+        y_pred_proba_cleaned = []
         
-        valid_indices = [i for i, (true_idx, pred_idx) in enumerate(zip(y_true_idx, y_pred_idx)) 
-                        if true_idx != -1 and pred_idx != -1]
+        for i, (true_label, pred_label) in enumerate(zip(y_true, y_pred)):
+            # Skip None values
+            if true_label is None or pred_label is None:
+                continue
+            
+            # Check if labels are valid
+            if true_label in self.class_names and pred_label in self.class_names:
+                y_true_cleaned.append(true_label)
+                y_pred_cleaned.append(pred_label)
+                
+                if y_pred_proba and i < len(y_pred_proba):
+                    proba = y_pred_proba[i]
+                    # Check for NaN or infinite values in probabilities
+                    if proba and len(proba) == len(self.class_names):
+                        proba_array = np.array(proba)
+                        if np.all(np.isfinite(proba_array)) and not np.any(np.isnan(proba_array)):
+                            # Normalize probabilities to sum to 1
+                            if np.sum(proba_array) > 0:
+                                proba_normalized = proba_array / np.sum(proba_array)
+                                y_pred_proba_cleaned.append(proba_normalized.tolist())
+                            else:
+                                # If all probabilities are 0, create uniform distribution
+                                uniform_proba = [1.0 / len(self.class_names)] * len(self.class_names)
+                                y_pred_proba_cleaned.append(uniform_proba)
+                        else:
+                            # Replace NaN/inf with uniform distribution
+                            uniform_proba = [1.0 / len(self.class_names)] * len(self.class_names)
+                            y_pred_proba_cleaned.append(uniform_proba)
+                    else:
+                        # Create uniform distribution if probabilities are missing or invalid
+                        uniform_proba = [1.0 / len(self.class_names)] * len(self.class_names)
+                        y_pred_proba_cleaned.append(uniform_proba)
         
-        print(f"Valid samples for evaluation: {len(valid_indices)}")
+        print(f"Valid samples after cleaning: {len(y_true_cleaned)}")
         
-        if not valid_indices:
-            print("❌ No valid samples for evaluation")
+        if len(y_true_cleaned) == 0:
+            print("❌ No valid samples for evaluation after cleaning")
             return self._empty_metrics()
         
-        y_true_filtered = [y_true_idx[i] for i in valid_indices]
-        y_pred_filtered = [y_pred_idx[i] for i in valid_indices]
+        # Convert labels to indices
+        label_to_idx = {label: idx for idx, label in enumerate(self.class_names)}
+        y_true_idx = [label_to_idx[label] for label in y_true_cleaned]
+        y_pred_idx = [label_to_idx[label] for label in y_pred_cleaned]
         
         # Find unique classes present in the data
-        unique_classes = sorted(list(set(y_true_filtered + y_pred_filtered)))
+        unique_classes = sorted(list(set(y_true_idx + y_pred_idx)))
         print(f"Unique classes found in data: {len(unique_classes)} out of {len(self.class_names)}")
         print(f"Present classes: {[self.class_names[i] for i in unique_classes]}")
         
-        if y_pred_proba:
-            y_pred_proba_filtered = [y_pred_proba[i] for i in valid_indices]
-            print(f"✓ Probability data available for ROC-AUC calculation")
+        if y_pred_proba_cleaned:
+            print(f"✓ Clean probability data available for ROC-AUC calculation")
         else:
-            y_pred_proba_filtered = None
-            print("⚠️ No probability data available - ROC-AUC will be 0")
+            y_pred_proba_cleaned = None
+            print("⚠️ No valid probability data available - ROC-AUC will be 0")
         
         print("Calculating basic metrics...")
-        accuracy = accuracy_score(y_true_filtered, y_pred_filtered)
+        accuracy = accuracy_score(y_true_idx, y_pred_idx)
         
-        precision_macro = precision_score(y_true_filtered, y_pred_filtered, average='macro', zero_division=0)
-        recall_macro = recall_score(y_true_filtered, y_pred_filtered, average='macro', zero_division=0)
-        f1_macro = f1_score(y_true_filtered, y_pred_filtered, average='macro', zero_division=0)
+        precision_macro = precision_score(y_true_idx, y_pred_idx, average='macro', zero_division=0)
+        recall_macro = recall_score(y_true_idx, y_pred_idx, average='macro', zero_division=0)
+        f1_macro = f1_score(y_true_idx, y_pred_idx, average='macro', zero_division=0)
         
-        precision_weighted = precision_score(y_true_filtered, y_pred_filtered, average='weighted', zero_division=0)
-        recall_weighted = recall_score(y_true_filtered, y_pred_filtered, average='weighted', zero_division=0)
-        f1_weighted = f1_score(y_true_filtered, y_pred_filtered, average='weighted', zero_division=0)
+        precision_weighted = precision_score(y_true_idx, y_pred_idx, average='weighted', zero_division=0)
+        recall_weighted = recall_score(y_true_idx, y_pred_idx, average='weighted', zero_division=0)
+        f1_weighted = f1_score(y_true_idx, y_pred_idx, average='weighted', zero_division=0)
         
         print(f"✓ Basic metrics calculated - Accuracy: {accuracy:.4f}")
         
         print("Calculating per-class metrics...")
         precision_per_class, recall_per_class, f1_per_class, support_per_class = precision_recall_fscore_support(
-            y_true_filtered, y_pred_filtered, labels=unique_classes, zero_division=0
+            y_true_idx, y_pred_idx, labels=unique_classes, zero_division=0
         )
         
         print("Calculating ROC-AUC metrics...")
-        roc_auc_metrics = self._calculate_roc_auc(y_true_filtered, y_pred_proba_filtered, unique_classes)
+        roc_auc_metrics = self._calculate_roc_auc(y_true_idx, y_pred_proba_cleaned, unique_classes)
         
         print("Creating confusion matrix...")
-        cm = confusion_matrix(y_true_filtered, y_pred_filtered, labels=unique_classes)
+        cm = confusion_matrix(y_true_idx, y_pred_idx, labels=unique_classes)
         
         print("Generating classification report...")
         # Only use class names for classes that are actually present
         present_class_names = [self.class_names[i] for i in unique_classes]
         class_report = classification_report(
-            y_true_filtered, y_pred_filtered,
+            y_true_idx, y_pred_idx,
             labels=unique_classes,  # Specify the actual labels present
             target_names=present_class_names,  # Only names for present classes
             output_dict=True, zero_division=0
@@ -455,7 +509,7 @@ class ComprehensiveEvaluator:
         metrics = {
             'overview': {
                 'total_samples': len(y_true),
-                'valid_samples': len(valid_indices),
+                'valid_samples': len(y_true_cleaned),
                 'unique_classes_present': len(unique_classes),
                 'total_classes_expected': len(self.class_names),
                 'accuracy': accuracy,
@@ -502,6 +556,14 @@ class ComprehensiveEvaluator:
             y_true_array = np.array(y_true)
             y_pred_proba_array = np.array(y_pred_proba)
             
+            # Validate probability array
+            if np.any(np.isnan(y_pred_proba_array)) or np.any(np.isinf(y_pred_proba_array)):
+                print("⚠️ Found NaN or Inf in probability array - cleaning...")
+                # Replace NaN/Inf with uniform distribution
+                for i in range(y_pred_proba_array.shape[0]):
+                    if np.any(np.isnan(y_pred_proba_array[i])) or np.any(np.isinf(y_pred_proba_array[i])):
+                        y_pred_proba_array[i] = np.ones(y_pred_proba_array.shape[1]) / y_pred_proba_array.shape[1]
+            
             # For multiclass ROC-AUC with missing classes, we need to be careful
             if len(unique_classes) < 2:
                 print("⚠️ Need at least 2 classes for ROC-AUC calculation")
@@ -517,21 +579,32 @@ class ComprehensiveEvaluator:
             # Binarize for One-vs-Rest (OvR) calculation
             y_true_binarized = label_binarize(y_true_array, classes=unique_classes)
             
-            # Ensure we have the right number of probability columns
+            # Handle single class case
+            if y_true_binarized.shape[1] == 1:
+                print("⚠️ Only one class present - cannot calculate ROC-AUC")
+                return {
+                    'ovr_macro': 0.0,
+                    'ovr_weighted': 0.0,
+                    'ovo_macro': 0.0,
+                    'ovo_weighted': 0.0,
+                    'per_class': {i: 0.0 for i in range(len(self.class_names))},
+                    'curves': {}
+                }
+            
+            # Use only columns corresponding to unique classes
             if y_pred_proba_array.shape[1] == len(self.class_names):
-                # Use only columns corresponding to unique classes
                 y_pred_proba_filtered = y_pred_proba_array[:, unique_classes]
             else:
-                # Assume probabilities match unique classes
                 y_pred_proba_filtered = y_pred_proba_array
             
-            # Calculate OvR ROC-AUC only if we have valid data
-            if y_true_binarized.shape[1] > 1 and y_pred_proba_filtered.shape[1] > 1:
+            # Calculate OvR ROC-AUC
+            try:
                 roc_auc_ovr_macro = roc_auc_score(y_true_binarized, y_pred_proba_filtered, 
                                                 average='macro', multi_class='ovr')
                 roc_auc_ovr_weighted = roc_auc_score(y_true_binarized, y_pred_proba_filtered, 
                                                    average='weighted', multi_class='ovr')
-            else:
+            except ValueError as e:
+                print(f"⚠️ OvR ROC-AUC calculation failed: {e}")
                 roc_auc_ovr_macro = 0.0
                 roc_auc_ovr_weighted = 0.0
             
@@ -558,15 +631,22 @@ class ComprehensiveEvaluator:
                     try:
                         if idx < y_true_binarized.shape[1] and idx < y_pred_proba_filtered.shape[1]:
                             if np.sum(y_true_binarized[:, idx]) > 0:  # Check if class has positive samples
-                                fpr, tpr, thresholds = roc_curve(y_true_binarized[:, idx], 
-                                                               y_pred_proba_filtered[:, idx])
-                                auc_score = auc(fpr, tpr)
-                                per_class_auc[class_idx] = float(auc_score)
-                                curves[class_name] = {
-                                    'fpr': fpr.tolist(),
-                                    'tpr': tpr.tolist(),
-                                    'auc': float(auc_score)
-                                }
+                                y_true_class = y_true_binarized[:, idx]
+                                y_score_class = y_pred_proba_filtered[:, idx]
+                                
+                                # Check for NaN in class data
+                                if not (np.any(np.isnan(y_true_class)) or np.any(np.isnan(y_score_class))):
+                                    fpr, tpr, thresholds = roc_curve(y_true_class, y_score_class)
+                                    auc_score = auc(fpr, tpr)
+                                    per_class_auc[class_idx] = float(auc_score)
+                                    curves[class_name] = {
+                                        'fpr': fpr.tolist(),
+                                        'tpr': tpr.tolist(),
+                                        'auc': float(auc_score)
+                                    }
+                                else:
+                                    print(f"⚠️ NaN found in class data for {class_name}")
+                                    per_class_auc[class_idx] = 0.0
                             else:
                                 per_class_auc[class_idx] = 0.0
                         else:
@@ -737,7 +817,8 @@ class MILK10kConceptCLIPPipeline:
             for ext in self.domain.image_extensions:
                 files = list(folder.glob(f"*{ext}"))
                 image_files.extend(files)
-                print(f"Found {len(files)} images in folder {folder.name}")
+                if files:  # Only print if files found
+                    print(f"Found {len(files)} images with extension {ext} in folder {folder.name}")
         
         print(f"Total images found: {len(image_files)} across {len(lesion_folders)} folders")
         print("✓ SECTION: Image file collection completed successfully")
@@ -758,6 +839,11 @@ class MILK10kConceptCLIPPipeline:
             else:
                 image = Image.open(image_path).convert('RGB')
             
+            # Ensure image is valid
+            if image.size[0] == 0 or image.size[1] == 0:
+                print(f"⚠️ Invalid image size: {image.size}")
+                return None
+            
             if self.domain.preprocessing_params.get('enhance_contrast', False):
                 from PIL import ImageEnhance
                 enhancer = ImageEnhance.Contrast(image)
@@ -765,12 +851,16 @@ class MILK10kConceptCLIPPipeline:
             
             if self.domain.preprocessing_params.get('normalize', True):
                 img_array = np.array(image)
-                if len(img_array.shape) == 3:
-                    import cv2
-                    lab = cv2.cvtColor(img_array, cv2.COLOR_RGB2LAB)
-                    lab[:,:,0] = cv2.equalizeHist(lab[:,:,0])
-                    img_array = cv2.cvtColor(lab, cv2.COLOR_LAB2RGB)
-                    image = Image.fromarray(img_array)
+                if len(img_array.shape) == 3 and img_array.shape[2] == 3:
+                    try:
+                        import cv2
+                        lab = cv2.cvtColor(img_array, cv2.COLOR_RGB2LAB)
+                        lab[:,:,0] = cv2.equalizeHist(lab[:,:,0])
+                        img_array = cv2.cvtColor(lab, cv2.COLOR_LAB2RGB)
+                        image = Image.fromarray(img_array)
+                    except:
+                        # If cv2 processing fails, skip normalization
+                        pass
             
             return image
         except Exception as e:
@@ -778,7 +868,7 @@ class MILK10kConceptCLIPPipeline:
             return None
     
     def classify_with_conceptclip(self, image: Image.Image) -> Tuple[str, List[float]]:
-        """Classify image using ConceptCLIP"""
+        """Classify image using ConceptCLIP with robust error handling"""
         try:
             inputs = self.conceptclip_processor(
                 images=image,
@@ -786,7 +876,9 @@ class MILK10kConceptCLIPPipeline:
                 return_tensors="pt"
             )
             
-            inputs = {k: v.to(self.device) if isinstance(v, torch.Tensor) else v for k, v in inputs.items()}
+            # Move inputs to device
+            inputs = {k: v.to(self.device) if isinstance(v, torch.Tensor) else v 
+                     for k, v in inputs.items()}
             
             with torch.no_grad():
                 outputs = self.conceptclip_model(**inputs)
@@ -795,69 +887,95 @@ class MILK10kConceptCLIPPipeline:
                 text_features = outputs['text_features']
                 logit_scale = outputs.get('logit_scale', torch.tensor(2.6592).to(self.device))
                 
+                # Normalize features
                 image_features = image_features / image_features.norm(dim=-1, keepdim=True)
                 text_features = text_features / text_features.norm(dim=-1, keepdim=True)
                 
+                # Calculate logits and probabilities
                 logits = (image_features @ text_features.T) * logit_scale.exp()
                 probs = torch.softmax(logits, dim=-1)
                 
                 pred_idx = probs.argmax(dim=-1).item()
                 pred_class = self.domain.class_names[pred_idx]
-                pred_probs = probs.squeeze().cpu().numpy().tolist()
+                pred_probs = probs.squeeze().cpu().numpy()
                 
-                if not isinstance(pred_probs, list):
+                # Ensure pred_probs is a list and handle different shapes
+                if pred_probs.ndim == 0:
                     pred_probs = [float(pred_probs)]
-                elif len(pred_probs) != len(self.domain.class_names):
+                else:
+                    pred_probs = pred_probs.tolist()
+                
+                # Ensure we have the right number of probabilities
+                if len(pred_probs) != len(self.domain.class_names):
                     if len(pred_probs) < len(self.domain.class_names):
+                        # Pad with zeros
                         pred_probs.extend([0.0] * (len(self.domain.class_names) - len(pred_probs)))
                     else:
+                        # Truncate
                         pred_probs = pred_probs[:len(self.domain.class_names)]
                 
+                # Check for NaN or infinite values and replace with uniform distribution
+                pred_probs_array = np.array(pred_probs)
+                if np.any(np.isnan(pred_probs_array)) or np.any(np.isinf(pred_probs_array)):
+                    print("⚠️ NaN or Inf detected in predictions, using uniform distribution")
+                    pred_probs = [1.0 / len(self.domain.class_names)] * len(self.domain.class_names)
+                    pred_idx = 0  # Default to first class
+                    pred_class = self.domain.class_names[pred_idx]
+                
                 return pred_class, pred_probs
+                
         except Exception as e:
             print(f"Error in ConceptCLIP classification: {e}")
+            # Return uniform random prediction as fallback
             import random
-            import numpy as np
-            pred_probs = np.random.dirichlet([1] * len(self.domain.class_names)).tolist()
-            pred_idx = np.argmax(pred_probs)
+            pred_probs = [1.0 / len(self.domain.class_names)] * len(self.domain.class_names)
+            pred_idx = random.randint(0, len(self.domain.class_names) - 1)
             pred_class = self.domain.class_names[pred_idx]
             return pred_class, pred_probs
     
     def get_ground_truth_label(self, image_id: str) -> Optional[str]:
-        """Get ground truth label for an image"""
+        """Get ground truth label for an image with improved matching"""
         if self.ground_truth is None:
             return None
         
+        # Try different matching strategies
         base_image_id = image_id
         if '.' in image_id:
             base_image_id = image_id.rsplit('.', 1)[0]
         
         matching_strategies = [
+            # Exact match
             lambda df, img_id: df[df['lesion_id'] == img_id],
+            # Base name match
             lambda df, img_id: df[df['lesion_id'] == base_image_id],
+            # Contains match (case insensitive)
             lambda df, img_id: df[df['lesion_id'].str.contains(img_id, na=False, case=False)],
+            # Base contains match
             lambda df, img_id: df[df['lesion_id'].str.contains(base_image_id, na=False, case=False)]
         ]
         
         row = None
-        for strategy in matching_strategies:
+        for i, strategy in enumerate(matching_strategies):
             try:
                 potential_row = strategy(self.ground_truth, image_id)
                 if not potential_row.empty:
                     row = potential_row.iloc[0]
                     break
-            except:
+            except Exception as e:
+                print(f"⚠️ Matching strategy {i} failed: {e}")
                 continue
         
         if row is None:
             return None
         
+        # Find the label with value 1.0
         for col, label in self.domain.label_mappings.items():
             if col in self.ground_truth.columns:
                 try:
-                    if pd.notna(row[col]) and float(row[col]) == 1.0:
+                    cell_value = row[col]
+                    if pd.notna(cell_value) and float(cell_value) == 1.0:
                         return label
-                except (ValueError, TypeError, KeyError):
+                except (ValueError, TypeError, KeyError) as e:
                     continue
         
         return None
@@ -886,19 +1004,26 @@ class MILK10kConceptCLIPPipeline:
         failed_classifications = 0
         matched_ground_truth = 0
         
-        for idx, image_path in enumerate(tqdm(image_files, desc="Classifying images")):
+        progress_bar = tqdm(image_files, desc="Classifying images")
+        
+        for idx, image_path in enumerate(progress_bar):
             if (idx + 1) % 50 == 0:
-                print(f"\n  Progress: {idx + 1}/{len(image_files)} images processed")
-                print(f"  Successful: {successful_classifications}, Failed: {failed_classifications}")
-                print(f"  Ground truth matches: {matched_ground_truth}")
+                progress_bar.set_postfix({
+                    'Success': successful_classifications,
+                    'Failed': failed_classifications,
+                    'GT_Match': matched_ground_truth
+                })
             
             image_id = image_path.stem
+            folder_name = image_path.parent.name
             
+            # Preprocess image
             image = self.preprocess_image(image_path)
             if image is None:
                 failed_classifications += 1
                 continue
             
+            # Classify with ConceptCLIP
             try:
                 pred_class, pred_probs = self.classify_with_conceptclip(image)
                 successful_classifications += 1
@@ -907,28 +1032,32 @@ class MILK10kConceptCLIPPipeline:
                 failed_classifications += 1
                 continue
             
-            true_class = self.get_ground_truth_label(image_path.parent.name)  # Use folder name as lesion_id
+            # Get ground truth label (try folder name as lesion_id)
+            true_class = self.get_ground_truth_label(folder_name)
             if true_class:
                 matched_ground_truth += 1
             
             result = {
                 'image_id': image_id,
                 'image_path': str(image_path.relative_to(self.dataset_path)),
+                'folder_id': folder_name,
                 'predicted_class': pred_class,
                 'prediction_probabilities': pred_probs,
                 'true_class': true_class,
                 'max_probability': max(pred_probs) if pred_probs else 0.0,
                 'prediction_confidence': max(pred_probs) if pred_probs else 0.0,
                 'method': 'ConceptCLIP-only',
-                'timestamp': datetime.now().isoformat(),
-                'folder_id': image_path.parent.name
+                'timestamp': datetime.now().isoformat()
             }
             results.append(result)
             
-            if true_class:
+            # Collect data for evaluation
+            if true_class and pred_class:
                 all_true_labels.append(true_class)
                 all_pred_labels.append(pred_class)
                 all_pred_probas.append(pred_probs)
+        
+        progress_bar.close()
         
         print(f"\n{'='*60}")
         print("PROCESSING COMPLETED")
@@ -940,8 +1069,10 @@ class MILK10kConceptCLIPPipeline:
         print(f"Success rate: {successful_classifications/len(image_files)*100:.1f}%")
         print(f"Ground truth coverage: {matched_ground_truth/len(image_files)*100:.1f}%")
         
+        # Save results
         self.save_results(results)
         
+        # Evaluate if we have ground truth data
         if all_true_labels:
             print(f"\n✓ Evaluating {len(all_true_labels)} samples with ground truth...")
             metrics = self.evaluator.calculate_comprehensive_metrics(
@@ -970,7 +1101,7 @@ class MILK10kConceptCLIPPipeline:
         
         json_path = self.output_path / "classifications" / "conceptclip_results.json"
         with open(json_path, 'w') as f:
-            json.dump(results, f, indent=2)
+            json.dump(results, f, indent=2, default=str)
         print(f"✓ Results saved to JSON: {json_path}")
         print("✓ SECTION: Results saving completed successfully")
     
@@ -978,9 +1109,26 @@ class MILK10kConceptCLIPPipeline:
         """Save evaluation metrics"""
         print("\n=== SAVING METRICS ===")
         
+        # Convert numpy types to native Python types for JSON serialization
+        def convert_numpy_types(obj):
+            if isinstance(obj, np.integer):
+                return int(obj)
+            elif isinstance(obj, np.floating):
+                return float(obj)
+            elif isinstance(obj, np.ndarray):
+                return obj.tolist()
+            elif isinstance(obj, dict):
+                return {k: convert_numpy_types(v) for k, v in obj.items()}
+            elif isinstance(obj, list):
+                return [convert_numpy_types(item) for item in obj]
+            else:
+                return obj
+        
+        metrics_clean = convert_numpy_types(metrics)
+        
         metrics_path = self.output_path / "evaluation_metrics" / "conceptclip_comprehensive_metrics.json"
         with open(metrics_path, 'w') as f:
-            json.dump(metrics, f, indent=2)
+            json.dump(metrics_clean, f, indent=2)
         print(f"✓ Comprehensive metrics saved: {metrics_path}")
         
         summary_path = self.output_path / "evaluation_metrics" / "conceptclip_summary.txt"
@@ -1026,7 +1174,8 @@ class MILK10kConceptCLIPPipeline:
                 'model_info': {
                     'type': 'ConceptCLIP',
                     'model_path': str(self.conceptclip_model_path),
-                    'device': str(self.device)
+                    'device': str(self.device),
+                    'conceptclip_available': CONCEPTCLIP_AVAILABLE
                 }
             },
             'performance_summary': metrics['overview'],
@@ -1038,7 +1187,7 @@ class MILK10kConceptCLIPPipeline:
         
         comparison_path = self.output_path / "comparison_data" / "conceptclip_comparison_data.json"
         with open(comparison_path, 'w') as f:
-            json.dump(comparison_data, f, indent=2)
+            json.dump(comparison_data, f, indent=2, default=str)
         print(f"✓ Comparison data saved: {comparison_path}")
         
         print("✓ SECTION: Comparison data saving completed successfully")
@@ -1056,14 +1205,15 @@ class MILK10kConceptCLIPPipeline:
                 'model_info': {
                     'type': 'ConceptCLIP',
                     'model_path': str(self.conceptclip_model_path),
-                    'device': str(self.device)
+                    'device': str(self.device),
+                    'conceptclip_available': CONCEPTCLIP_AVAILABLE
                 },
                 'note': 'No ground truth available - predictions only'
             },
             'prediction_summary': {
                 'total_predictions': len(results),
                 'successful_predictions': len([r for r in results if r['predicted_class']]),
-                'average_confidence': np.mean([r['prediction_confidence'] for r in results if r['prediction_confidence']]),
+                'average_confidence': float(np.mean([r['prediction_confidence'] for r in results if r['prediction_confidence']])) if results else 0.0,
                 'prediction_distribution': self._calculate_class_distribution(results)
             },
             'detailed_results': results[:100],  # Save first 100 detailed results
@@ -1072,7 +1222,7 @@ class MILK10kConceptCLIPPipeline:
         
         comparison_path = self.output_path / "comparison_data" / "conceptclip_basic_comparison_data.json"
         with open(comparison_path, 'w') as f:
-            json.dump(comparison_data, f, indent=2)
+            json.dump(comparison_data, f, indent=2, default=str)
         print(f"✓ Basic comparison data saved: {comparison_path}")
         
         print("✓ SECTION: Basic comparison data saving completed successfully")
@@ -1089,10 +1239,18 @@ class MILK10kConceptCLIPPipeline:
     
     def _calculate_confidence_stats(self, results: List[Dict]) -> Dict:
         """Calculate confidence statistics"""
-        confidences = [r['prediction_confidence'] for r in results if r['prediction_confidence']]
+        confidences = [r['prediction_confidence'] for r in results if r['prediction_confidence'] and not np.isnan(r['prediction_confidence'])]
         
         if not confidences:
-            return {}
+            return {
+                'mean_confidence': 0.0,
+                'median_confidence': 0.0,
+                'std_confidence': 0.0,
+                'min_confidence': 0.0,
+                'max_confidence': 0.0,
+                'q25_confidence': 0.0,
+                'q75_confidence': 0.0
+            }
         
         return {
             'mean_confidence': float(np.mean(confidences)),
