@@ -1,4 +1,11 @@
 import os
+os.environ["OMP_NUM_THREADS"] = "1"
+os.environ["OPENBLAS_NUM_THREADS"] = "1"
+os.environ["MKL_NUM_THREADS"] = "1"
+os.environ["BLIS_NUM_THREADS"] = "1"
+os.environ["VECLIB_MAXIMUM_THREADS"] = "1"
+os.environ["NUMEXPR_NUM_THREADS"] = "1"
+
 import cv2
 import torch
 import numpy as np
@@ -25,23 +32,20 @@ from sklearn.preprocessing import label_binarize
 warnings.filterwarnings('ignore')
 
 print("="*60)
-print("✓ All imports loaded successfully")
+print("✓ All standard imports loaded successfully")
 print("="*60)
 
 # Set up Python path for ConceptModel imports
 import sys
 sys.path.insert(0, '/project/def-arashmoh/shahab33/XAI/MILK10k_Training_Input')
 
-# Import local ConceptCLIP modules directly
+# Import local ConceptCLIP modules directly with error checking
 try:
     from ConceptModel.modeling_conceptclip import ConceptCLIP
     from ConceptModel.preprocessor_conceptclip import ConceptCLIPProcessor
-    print("✓ ConceptCLIP modules imported successfully")
-    CONCEPTCLIP_AVAILABLE = True
+    print("✓ Real ConceptCLIP modules imported successfully")
 except ImportError as e:
-    print(f"⚠️ ConceptCLIP import error: {e}")
-    print("Will use dummy models for testing")
-    CONCEPTCLIP_AVAILABLE = False
+    raise ImportError(f"❌ Failed to import real ConceptCLIP modules: {e}. Ensure the files modeling_conceptclip.py and preprocessor_conceptclip.py are in /project/def-arashmoh/shahab33/XAI/MILK10k_Training_Input/ConceptModel and the path is correct.")
 
 print("✓ SECTION: Module imports completed successfully")
 print("-"*60)
@@ -131,9 +135,7 @@ def setup_gpu_environment():
             del test_tensor
             torch.cuda.empty_cache()
         except Exception as e:
-            print(f"❌ GPU allocation test failed: {e}")
-            print("Falling back to CPU")
-            device = "cpu"
+            raise RuntimeError(f"❌ GPU allocation test failed: {e}. Check GPU availability or configuration.")
     else:
         print("⚠️ CUDA not available. Using CPU.")
         device = "cpu"
@@ -174,7 +176,7 @@ def setup_offline_environment(cache_path: str):
         if len(cached_models) > 5:
             print(f"   ... and {len(cached_models) - 5} more")
     else:
-        print(f"❌ Cache directory does not exist: {cache_path}")
+        raise FileNotFoundError(f"❌ Cache directory does not exist: {cache_path}")
         
     print("✓ Offline environment setup complete")
     print("✓ SECTION: Offline environment setup completed successfully")
@@ -186,134 +188,62 @@ def load_local_conceptclip_models(model_path: str, cache_path: str, device: str)
     """Load local ConceptCLIP models with offline support"""
     print("\n=== LOADING CONCEPTCLIP MODELS ===")
     
-    if not CONCEPTCLIP_AVAILABLE:
-        print("❌ ConceptCLIP modules not available - creating dummy model")
-        dummy_model = create_dummy_conceptclip_model(device)
-        dummy_processor = create_simple_processor()
-        print("✓ SECTION: Dummy model creation completed successfully")
-        print("-"*60)
-        return dummy_model, dummy_processor
+    setup_offline_environment(cache_path)
     
+    print(f"Loading ConceptCLIP from local path: {model_path}")
+    print(f"Using cache directory: {cache_path}")
+    
+    # Check if model path exists
+    model_path_obj = Path(model_path)
+    if not model_path_obj.exists():
+        raise FileNotFoundError(f"❌ Model path does not exist: {model_path}. Ensure the ready model files are downloaded to this location.")
+    
+    # Load the model
+    model = ConceptCLIP.from_pretrained(
+        model_path,
+        local_files_only=True,
+        cache_dir=cache_path,
+        trust_remote_code=True
+    )
+    print("✓ ConceptCLIP model loaded successfully")
+    
+    processor = ConceptCLIPProcessor.from_pretrained(
+        model_path,
+        local_files_only=True,
+        cache_dir=cache_path,
+        trust_remote_code=True
+    )
+    print("✓ ConceptCLIP processor loaded successfully")
+    
+    model = model.to(device)
+    model.eval()
+    
+    # Test model with a local MILK10k image to ensure it works
     try:
-        setup_offline_environment(cache_path)
+        sample_image_path = next(Path(DATASET_PATH).rglob("*.jpg"), None)  # Find first .jpg in dataset
+        if sample_image_path is None:
+            raise FileNotFoundError("❌ No sample .jpg image found in dataset path for testing. Check if dataset contains images.")
+        print(f"Testing with local sample image: {sample_image_path}")
         
-        print(f"Loading ConceptCLIP from local path: {model_path}")
-        print(f"Using cache directory: {cache_path}")
+        image = Image.open(sample_image_path).convert('RGB')
+        text = ["a dermatoscopic image showing actinic keratosis", "a dermatoscopic image showing basal cell carcinoma"]  # Sample texts from your prompts
         
-        # Check if model path exists
-        model_path_obj = Path(model_path)
-        if not model_path_obj.exists():
-            raise FileNotFoundError(f"Model path does not exist: {model_path}")
-        
-        # Try to load the model
-        model = ConceptCLIP.from_pretrained(
-            model_path,
-            local_files_only=True,
-            cache_dir=cache_path,
-            torch_dtype=torch.float32,
-            trust_remote_code=True
-        )
-        print("✓ ConceptCLIP model loaded")
-        
-        try:
-            processor = ConceptCLIPProcessor.from_pretrained(
-                model_path,
-                local_files_only=True,
-                cache_dir=cache_path,
-                trust_remote_code=True
-            )
-            print("✓ ConceptCLIP processor loaded")
-        except Exception as e:
-            print(f"⚠️ Processor loading error: {e}")
-            print("Using simple processor fallback")
-            processor = create_simple_processor()
-        
-        model = model.to(device)
-        model.eval()
-        
-        print(f"✓ ConceptCLIP loaded successfully on {device}")
-        print("✓ SECTION: ConceptCLIP model loading completed successfully")
-        print("-"*60)
-        return model, processor
-        
+        inputs = processor(images=image, text=text, return_tensors="pt", padding=True, truncation=True)
+        inputs = {k: v.to(device) if isinstance(v, torch.Tensor) else v for k, v in inputs.items()}
+        with torch.no_grad():
+            outputs = model(**inputs)
+        logits_per_image = outputs.logits_per_image
+        probs = logits_per_image.softmax(dim=1)
+        print("✓ Model inference test successful. Sample probabilities:", probs.cpu().numpy().tolist())
     except Exception as e:
-        print(f"❌ Error loading local ConceptCLIP: {e}")
-        import traceback
-        traceback.print_exc()
-        print("Creating dummy ConceptCLIP model for testing...")
-        dummy_model = create_dummy_conceptclip_model(device)
-        dummy_processor = create_simple_processor()
-        print("✓ SECTION: Dummy model creation completed successfully")
-        print("-"*60)
-        return dummy_model, dummy_processor
+        raise RuntimeError(f"❌ Model inference test failed: {e}. The model may not be working correctly with local data. Check if weights are properly loaded.")
+    
+    print(f"✓ ConceptCLIP loaded and tested successfully on {device}")
+    print("✓ SECTION: ConceptCLIP model loading completed successfully")
+    print("-"*60)
+    return model, processor
 
-def create_dummy_conceptclip_model(device: str):
-    """Create a dummy ConceptCLIP model for testing"""
-    print("Creating dummy ConceptCLIP model...")
-    
-    class DummyConceptCLIP:
-        def __init__(self, device):
-            self.device = device
-            print(f"✓ Dummy ConceptCLIP initialized on {device}")
-            
-        def to(self, device):
-            self.device = device
-            return self
-            
-        def eval(self):
-            return self
-            
-        def __call__(self, **inputs):
-            batch_size = inputs['pixel_values'].shape[0] if 'pixel_values' in inputs else 1
-            text_size = inputs['input_ids'].shape[0] if 'input_ids' in inputs else 10
-            
-            return {
-                'image_features': torch.randn(batch_size, 512).to(self.device),
-                'text_features': torch.randn(text_size, 512).to(self.device),
-                'logit_scale': torch.tensor(2.6592).to(self.device)
-            }
-    
-    return DummyConceptCLIP(device)
-
-def create_simple_processor():
-    """Create a simple processor for ConceptCLIP"""
-    print("Creating simple processor...")
-    
-    class SimpleProcessor:
-        def __call__(self, images=None, text=None, return_tensors="pt", **kwargs):
-            import torch
-            from PIL import Image
-            import torchvision.transforms as transforms
-            
-            result = {}
-            
-            if images is not None:
-                transform = transforms.Compose([
-                    transforms.Resize((384, 384)),
-                    transforms.ToTensor(),
-                    transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-                ])
-                
-                if isinstance(images, Image.Image):
-                    images = [images]
-                
-                processed = torch.stack([transform(img) for img in images])
-                result['pixel_values'] = processed
-            
-            if text is not None:
-                if isinstance(text, str):
-                    text = [text]
-                
-                max_length = 77
-                result['input_ids'] = torch.randint(0, 1000, (len(text), max_length))
-                result['attention_mask'] = torch.ones((len(text), max_length))
-            
-            return result
-    
-    print("✓ Simple processor created")
-    return SimpleProcessor()
-
-# ==================== UPDATED MILK10k DOMAIN CONFIGURATION ====================
+# ==================== MILK10k DOMAIN CONFIGURATION ====================
 
 @dataclass
 class MedicalDomain:
@@ -714,7 +644,9 @@ class MILK10kConceptCLIPPipeline:
     
     def __init__(self, dataset_path: str, groundtruth_path: str, 
                  conceptclip_model_path: str = None, cache_path: str = None):
-        print("\n=== INITIALIZING MILK10K CONCEPTCLIP-ONLY PIPELINE ===")
+        print("\n" + "="*80)
+        print(" MILK10K CONCEPTCLIP-ONLY CLASSIFICATION PIPELINE INITIALIZATION ".center(80))
+        print("="*80)
         
         self.dataset_path = Path(dataset_path)
         self.groundtruth_path = groundtruth_path
@@ -723,14 +655,14 @@ class MILK10kConceptCLIPPipeline:
         self.domain = MILK10K_DOMAIN
         
         self.debug_mode = DEBUG_MODE
-        self.max_folders = MAX_FOLDERS
+        self.max_folders = MAX_FOLDERS if DEBUG_MODE else None
         
         print(f"Dataset path: {self.dataset_path}")
         print(f"Ground truth path: {self.groundtruth_path}")
         print(f"ConceptCLIP model path: {self.conceptclip_model_path}")
         print(f"Cache path: {self.cache_path}")
         print(f"DEBUG MODE: {'ENABLED' if self.debug_mode else 'DISABLED'}")
-        print(f"Max folders to process: {self.max_folders}")
+        print(f"Max folders to process: {self.max_folders if self.max_folders else 'All'}")
         
         self.output_path = setup_output_folder()
         print(f"Output folder: {self.output_path}")
@@ -768,7 +700,7 @@ class MILK10kConceptCLIPPipeline:
                 print(f"Columns: {list(self.ground_truth.columns)}")
                 
                 if 'lesion_id' in self.ground_truth.columns:
-                    print("✓ lesion_id column found for image matching")
+                    print("✓ lesion_id column found for folder matching")
                     print("Sample ground truth data:")
                     print(self.ground_truth.head())
                     
@@ -783,27 +715,21 @@ class MILK10kConceptCLIPPipeline:
                             mapped_label = self.domain.label_mappings.get(col, col)
                             print(f"  {col} ({mapped_label}): {count} samples")
                 else:
-                    print("⚠️ lesion_id column not found!")
-                    print("Available columns:", list(self.ground_truth.columns))
+                    raise ValueError("❌ lesion_id column not found! Required for folder-level matching.")
                     
                 print("✓ SECTION: Ground truth loading completed successfully")
                 print("-"*60)
             except Exception as e:
-                print(f"❌ Error loading ground truth: {e}")
-                import traceback
-                traceback.print_exc()
-                self.ground_truth = None
+                raise RuntimeError(f"❌ Error loading ground truth: {e}")
         else:
-            print(f"❌ Ground truth file not found: {self.groundtruth_path}")
-            self.ground_truth = None
+            raise FileNotFoundError(f"❌ Ground truth file not found: {self.groundtruth_path}")
     
     def get_image_files(self) -> List[Path]:
         """Get image files from the first 50 folders"""
         print("\n=== COLLECTING IMAGE FILES FROM FOLDERS ===")
         
         if not self.dataset_path.exists():
-            print(f"❌ Dataset path does not exist: {self.dataset_path}")
-            return []
+            raise FileNotFoundError(f"❌ Dataset path does not exist: {self.dataset_path}")
         
         image_files = []
         lesion_folders = sorted([f for f in self.dataset_path.iterdir() if f.is_dir() and not f.name.startswith('.')])
@@ -817,8 +743,13 @@ class MILK10kConceptCLIPPipeline:
             for ext in self.domain.image_extensions:
                 files = list(folder.glob(f"*{ext}"))
                 image_files.extend(files)
-                if files:  # Only print if files found
-                    print(f"Found {len(files)} images with extension {ext} in folder {folder.name}")
+                if not files:
+                    print(f"⚠️ No images with extension {ext} found in {folder.name}")
+                else:
+                    print(f"Found {len(files)} images with extension {ext} in {folder.name}")
+        
+        if not image_files:
+            raise ValueError("❌ No image files found in any folders. Check dataset path and extensions.")
         
         print(f"Total images found: {len(image_files)} across {len(lesion_folders)} folders")
         print("✓ SECTION: Image file collection completed successfully")
@@ -860,11 +791,12 @@ class MILK10kConceptCLIPPipeline:
                         image = Image.fromarray(img_array)
                     except:
                         # If cv2 processing fails, skip normalization
+                        print(f"⚠️ Normalization failed for {image_path}")
                         pass
             
             return image
         except Exception as e:
-            print(f"Error preprocessing {image_path}: {e}")
+            print(f"❌ Error preprocessing {image_path}: {e}")
             return None
     
     def classify_with_conceptclip(self, image: Image.Image) -> Tuple[str, List[float]]:
@@ -907,76 +839,36 @@ class MILK10kConceptCLIPPipeline:
                 
                 # Ensure we have the right number of probabilities
                 if len(pred_probs) != len(self.domain.class_names):
-                    if len(pred_probs) < len(self.domain.class_names):
-                        # Pad with zeros
-                        pred_probs.extend([0.0] * (len(self.domain.class_names) - len(pred_probs)))
-                    else:
-                        # Truncate
-                        pred_probs = pred_probs[:len(self.domain.class_names)]
+                    raise ValueError(f"❌ Unexpected number of probabilities: {len(pred_probs)} (expected {len(self.domain.class_names)})")
                 
-                # Check for NaN or infinite values and replace with uniform distribution
+                # Check for NaN or infinite values and raise error
                 pred_probs_array = np.array(pred_probs)
                 if np.any(np.isnan(pred_probs_array)) or np.any(np.isinf(pred_probs_array)):
-                    print("⚠️ NaN or Inf detected in predictions, using uniform distribution")
-                    pred_probs = [1.0 / len(self.domain.class_names)] * len(self.domain.class_names)
-                    pred_idx = 0  # Default to first class
-                    pred_class = self.domain.class_names[pred_idx]
+                    raise ValueError("❌ NaN or Inf detected in predictions")
                 
                 return pred_class, pred_probs
                 
         except Exception as e:
-            print(f"Error in ConceptCLIP classification: {e}")
-            # Return uniform random prediction as fallback
-            import random
-            pred_probs = [1.0 / len(self.domain.class_names)] * len(self.domain.class_names)
-            pred_idx = random.randint(0, len(self.domain.class_names) - 1)
-            pred_class = self.domain.class_names[pred_idx]
-            return pred_class, pred_probs
+            import traceback
+            traceback.print_exc()
+            raise RuntimeError(f"❌ Error in ConceptCLIP classification: {e}")
     
-    def get_ground_truth_label(self, image_id: str) -> Optional[str]:
-        """Get ground truth label for an image with improved matching"""
+    def get_ground_truth_label(self, folder_name: str) -> Optional[str]:
+        """Get ground truth label for a folder (lesion_id is folder-level)"""
         if self.ground_truth is None:
             return None
         
-        # Try different matching strategies
-        base_image_id = image_id
-        if '.' in image_id:
-            base_image_id = image_id.rsplit('.', 1)[0]
-        
-        matching_strategies = [
-            # Exact match
-            lambda df, img_id: df[df['lesion_id'] == img_id],
-            # Base name match
-            lambda df, img_id: df[df['lesion_id'] == base_image_id],
-            # Contains match (case insensitive)
-            lambda df, img_id: df[df['lesion_id'].str.contains(img_id, na=False, case=False)],
-            # Base contains match
-            lambda df, img_id: df[df['lesion_id'].str.contains(base_image_id, na=False, case=False)]
-        ]
-        
-        row = None
-        for i, strategy in enumerate(matching_strategies):
-            try:
-                potential_row = strategy(self.ground_truth, image_id)
-                if not potential_row.empty:
-                    row = potential_row.iloc[0]
-                    break
-            except Exception as e:
-                print(f"⚠️ Matching strategy {i} failed: {e}")
-                continue
-        
-        if row is None:
+        # Use folder name as lesion_id
+        row = self.ground_truth[self.ground_truth['lesion_id'] == folder_name]
+        if row.empty:
             return None
+        
+        row = row.iloc[0]
         
         # Find the label with value 1.0
         for col, label in self.domain.label_mappings.items():
-            if col in self.ground_truth.columns:
-                try:
-                    cell_value = row[col]
-                    if pd.notna(cell_value) and float(cell_value) == 1.0:
-                        return label
-                except (ValueError, TypeError, KeyError) as e:
-                    continue
+            if col in self.ground_truth.columns and float(row[col]) == 1.0:
+                return label
         
         return None
     
@@ -990,8 +882,7 @@ class MILK10kConceptCLIPPipeline:
         image_files = self.get_image_files()
         
         if not image_files:
-            print("❌ No image files found!")
-            return
+            raise ValueError("❌ No image files found!")
         
         print(f"\n✓ Processing {len(image_files)} images across {len(set(f.parent.name for f in image_files))} folders...")
         
@@ -1028,11 +919,11 @@ class MILK10kConceptCLIPPipeline:
                 pred_class, pred_probs = self.classify_with_conceptclip(image)
                 successful_classifications += 1
             except Exception as e:
-                print(f"Classification failed for {image_id}: {e}")
+                print(f"❌ Classification failed for {image_id}: {e}")
                 failed_classifications += 1
                 continue
             
-            # Get ground truth label (try folder name as lesion_id)
+            # Get ground truth label (folder-level)
             true_class = self.get_ground_truth_label(folder_name)
             if true_class:
                 matched_ground_truth += 1
@@ -1066,8 +957,8 @@ class MILK10kConceptCLIPPipeline:
         print(f"Successful classifications: {successful_classifications}")
         print(f"Failed classifications: {failed_classifications}")
         print(f"Images with ground truth: {matched_ground_truth}")
-        print(f"Success rate: {successful_classifications/len(image_files)*100:.1f}%")
-        print(f"Ground truth coverage: {matched_ground_truth/len(image_files)*100:.1f}%")
+        print(f"Success rate: {successful_classifications/len(image_files)*100:.1f}%" if image_files else "N/A")
+        print(f"Ground truth coverage: {matched_ground_truth/len(image_files)*100:.1f}%" if image_files else "N/A")
         
         # Save results
         self.save_results(results)
@@ -1087,7 +978,6 @@ class MILK10kConceptCLIPPipeline:
         
         print("\n" + "="*80)
         print(" CONCEPTCLIP-ONLY PIPELINE EXECUTION COMPLETE ".center(80))
-        print(f" Results saved to: {self.output_path} ".center(80))
         print("="*80)
     
     def save_results(self, results: List[Dict]):
@@ -1174,8 +1064,7 @@ class MILK10kConceptCLIPPipeline:
                 'model_info': {
                     'type': 'ConceptCLIP',
                     'model_path': str(self.conceptclip_model_path),
-                    'device': str(self.device),
-                    'conceptclip_available': CONCEPTCLIP_AVAILABLE
+                    'device': str(self.device)
                 }
             },
             'performance_summary': metrics['overview'],
@@ -1205,8 +1094,7 @@ class MILK10kConceptCLIPPipeline:
                 'model_info': {
                     'type': 'ConceptCLIP',
                     'model_path': str(self.conceptclip_model_path),
-                    'device': str(self.device),
-                    'conceptclip_available': CONCEPTCLIP_AVAILABLE
+                    'device': str(self.device)
                 },
                 'note': 'No ground truth available - predictions only'
             },
@@ -1338,7 +1226,6 @@ def main():
     """Main execution function"""
     print("\n" + "="*80)
     print(" MILK10K CONCEPTCLIP-ONLY CLASSIFICATION PIPELINE ".center(80))
-    print(" INITIALIZATION ".center(80))
     print("="*80)
     
     try:
