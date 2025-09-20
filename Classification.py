@@ -51,7 +51,6 @@ print("✓ SECTION: Module imports completed successfully")
 print("-"*60)
 
 # ==================== CONFIGURATION ====================
-
 # DEBUG MODE - Process 50 folders instead of all
 DEBUG_MODE = False
 MAX_FOLDERS = 50  # Limit to 50 folders as requested
@@ -60,8 +59,8 @@ MAX_FOLDERS = 50  # Limit to 50 folders as requested
 DATASET_PATH = "/project/def-arashmoh/shahab33/XAI/MILK10k_Training_Input/MILK10k_Training_Input"
 GROUNDTRUTH_PATH = "/project/def-arashmoh/shahab33/XAI/MILK10k_Training_Input/MILK10k_Training_GroundTruth.csv"
 
-# Output path
-BASE_OUTPUT_PATH = "/project/def-arashmoh/shahab33/XAI/MILK10k_Training_Input/ConceptCLIP_Only_Results"
+# Output path (updated to match SLURM OUTPUT_PATH)
+BASE_OUTPUT_PATH = os.environ.get("OUTPUT_PATH", "/project/def-arashmoh/shahab33/XAI/MILK10k_Training_Input/OnlyResualts")
 
 # Local model paths
 CONCEPTCLIP_MODEL_PATH = "/project/def-arashmoh/shahab33/XAI/MILK10k_Training_Input/ConceptModel"
